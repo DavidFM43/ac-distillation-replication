@@ -28,11 +28,8 @@ uv run --group infra python infra/vllm_host.py status
 uv run --group infra python infra/vllm_host.py down
 ```
 
-`infra/check_endpoint.py` checks a running endpoint using only the standard library:
-
-1. auth: rejected without the API key, accepted with it
-2. sampling from exact token ids, with logprobs
-3. prefix-cache hits on a repeated prompt
+`infra/check_endpoint.py` checks that a running endpoint rejects requests without the API key
+(401) and accepts them with it (200). It uses only the standard library.
 
 ```bash
 uv run python infra/check_endpoint.py
