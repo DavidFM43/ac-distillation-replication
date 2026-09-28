@@ -1,0 +1,25 @@
+[project]
+name = "sd-swebench"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "datasets>=5.0.1",
+    "mini-swe-agent>=2.4.6",
+    "modal>=1.5.5",
+    "swebench>=5.0.2",
+    "tinker>=0.30.4",
+    "tinker-cookbook>=0.5.7",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+infra = [
+    "skypilot[aws,runpod]>=0.13.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
