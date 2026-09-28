@@ -28,13 +28,6 @@ uv run --group infra python infra/vllm_host.py status
 uv run --group infra python infra/vllm_host.py down
 ```
 
-`infra/check_endpoint.py` checks that a running endpoint rejects requests without the API key
-(401) and accepts them with it (200). It uses only the standard library.
-
-```bash
-uv run python infra/check_endpoint.py
-```
-
 Notes from the first deployment (vLLM 0.30.0, A40):
 
 - The `vllm/vllm-openai` image's `vllm serve` entrypoint swallows SkyPilot's SSH setup on
