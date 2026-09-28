@@ -1,0 +1,31 @@
+# Deployment for Qwen3.5-9B rollouts: the engine version and its settings, versioned together.
+# Hardware (GPU type/count, --tensor-parallel-size) comes from
+# `infra/vllm_host.py up --gpus ...`, not from here.
+
+# Engine version: flag names and Qwen3.5 support (hybrid-layer prefix caching, MTP bugs)
+# change between vLLM releases, so the version is pinned with the settings it was chosen for.
+# Installed with pip on the node (the vllm/vllm-openai image's `vllm serve` entrypoint
+# swallows SkyPilot's SSH setup on RunPod).
+engine: vllm==0.30.0
+
+# Environment for `vllm serve`.
+env:
+  # FlashInfer's top-k/top-p sampler JIT-compiles a CUDA kernel on first use and needs
+  # nvcc, which the base images don't ship. vLLM's PyTorch sampler needs no compiler.
+  VLLM_USE_FLASHINFER_SAMPLER: "0"
+
+# Passed to `vllm serve --config` as-is.
+vllm:
+  model: Qwen/Qwen3.5-9B
+  revision: c202236235762e1c871ad0ccb60c8ee5ba337b9a  # pinned HF commit
+  dtype: bfloat16             # same precision as Tinker; FP8 would shift logprobs
+  language-model-only: true   # text-only workload, skip the vision encoder
+  max-model-len: 131072
+
+  # Agent turns re-send the whole conversation; prefix reuse is what makes this cheap.
+  # Experimental for Qwen3.5's hybrid (linear-attention) layers in vLLM: check the
+  # prefix-cache hit rate in /metrics before trusting throughput numbers.
+  enable-prefix-caching: true
+
+  # No MTP speculative decoding: vLLM has an open report of garbled tool calls on
+  # prefix-cache hits with MTP enabled on Qwen3.5-style hybrid models.
