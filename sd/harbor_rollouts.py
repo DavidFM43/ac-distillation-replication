@@ -37,6 +37,7 @@ from tinker_cookbook.tool_use import ToolResult, build_agent_tool_env, simple_to
 
 from sd.prompts import INSTANCE_TEMPLATE, SYSTEM_PROMPT, observation
 from sd.renderer import Qwen35AgentRenderer, get_agent_renderer
+from sd.run_status import RunStatus, TrackingPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -155,10 +156,13 @@ def to_record(task, config, trajectory: Trajectory, messages, grade, elapsed, er
     }
 
 
-async def run_task(task, policy, renderer, config, max_turns, max_context, max_tokens) -> dict:
+async def run_task(task, policy, renderer, config, max_turns, max_context, max_tokens, status=None) -> dict:
     start = time.monotonic()
     sandbox = trajectory = grade = error = None
     messages: list = []
+    if status is not None:
+        status.start(task.task_name)
+        policy = TrackingPolicy(policy, status, task.task_name)
     try:
         sandbox = await create_sandbox(task)
         tools = SweTools(sandbox)
@@ -186,6 +190,8 @@ async def run_task(task, policy, renderer, config, max_turns, max_context, max_t
             except Exception as e:
                 logger.warning("Sandbox cleanup failed for %s: %s", task.task_name, e)
     record = to_record(task, config, trajectory, messages, grade, time.monotonic() - start, error)
+    if status is not None:
+        status.finish(task.task_name, record)
     logger.info(
         "%s: stop=%s submitted=%s turn=%s tests_passed=%s",
         task.task_name, record["stop_reason"], record["submitted"], record["submit_turn"], record["tests_passed"],
@@ -201,10 +207,32 @@ def load_policy_factory(spec: str) -> Callable[..., TokenCompleter]:
     return getattr(importlib.import_module(module_name), attr)
 
 
-async def main_async(policy_spec, model_name, n_tasks, seed, output, max_turns, max_context, max_tokens, temperature):
-    tasks = load_harbor_tasks(DATASET)
+def select_tasks(tasks: list[HarborTask], seed: int, split: str, split_size: int, n_tasks: int | None) -> list[HarborTask]:
+    """Fixed-seed shuffle of all tasks; `train` is the first `split_size`, `eval` the rest.
+
+    The shuffle is the same for every split, so `all` with `n_tasks=10` is the first 10 of `train`.
+    """
+    tasks = sorted(tasks, key=lambda t: t.task_name)
     random.Random(seed).shuffle(tasks)
-    tasks = tasks[:n_tasks]
+    tasks = {"all": tasks, "train": tasks[:split_size], "eval": tasks[split_size:]}[split]
+    return tasks[:n_tasks] if n_tasks is not None else tasks
+
+
+def finished_ids(output: Path) -> set[str]:
+    """Tasks already in the output without an error; they're skipped on resume (errored ones are retried)."""
+    if not output.exists():
+        return set()
+    return {r["instance_id"] for r in map(json.loads, output.read_text().splitlines()) if not r["error"]}
+
+
+async def main_async(
+    policy_spec, model_name, split, split_size, n_tasks, seed, output, max_turns, max_context, max_tokens,
+    temperature, max_concurrency, metrics_port,
+):
+    tasks = select_tasks(load_harbor_tasks(DATASET), seed, split, split_size, n_tasks)
+    done = finished_ids(output)
+    todo = [t for t in tasks if t.task_name not in done]
+    logger.info("%d tasks in %s split, %d already finished, %d to run", len(tasks), split, len(done), len(todo))
 
     renderer = get_agent_renderer(model_name)
     policy = load_policy_factory(policy_spec)(model_name=model_name, max_tokens=max_tokens, temperature=temperature)
@@ -217,16 +245,24 @@ async def main_async(policy_spec, model_name, n_tasks, seed, output, max_turns, 
         "max_context": max_context,
         "max_turns": max_turns,
         "seed": seed,
+        "split": split,
+        "split_size": split_size,
     }
 
     output.parent.mkdir(parents=True, exist_ok=True)
+    status = RunStatus(output.parent / "status.json", config | {"max_concurrency": max_concurrency},
+                       [t.task_name for t in todo], metrics_port)
+    slots = asyncio.Semaphore(max_concurrency)
+
+    async def run_limited(task):
+        async with slots:
+            return await run_task(task, policy, renderer, config, max_turns, max_context, max_tokens, status)
+
     with output.open("a") as f:
-        for coro in asyncio.as_completed(
-            [run_task(t, policy, renderer, config, max_turns, max_context, max_tokens) for t in tasks]
-        ):
+        for coro in asyncio.as_completed([run_limited(t) for t in todo]):
             f.write(json.dumps(await coro) + "\n")
             f.flush()
-    print(f"Wrote {len(tasks)} trajectories to {output}")
+    print(f"Wrote {len(todo)} trajectories to {output}")
 
 
 def main(
@@ -234,17 +270,30 @@ def main(
         ..., help="Policy factory as 'package.module:function', e.g. sd.tinker_policy:make_tinker_policy"
     ),
     model_name: str = "Qwen/Qwen3.5-9B",
-    n_tasks: int = 10,
+    split: str = typer.Option("all", help="all, train (first --split-size of the shuffle) or eval (the rest)"),
+    split_size: int = 250,
+    n_tasks: int = typer.Option(None, help="Run only the first N tasks of the split"),
     seed: int = 0,
     output: Path = Path("runs/baseline/trajectories.jsonl"),
     max_turns: int = 150,
     max_context: int = 65536,
     max_tokens: int = 16384,
     temperature: float = 1.0,
+    max_concurrency: int = typer.Option(25, help="Tasks running at once (Modal sandboxes and model requests)"),
+    metrics_port: int = typer.Option(9101, help="Prometheus metrics port (0 to disable)"),
 ) -> None:
-    """Temperature 1.0 (no top-p/top-k) keeps sampled logprobs equal to the model's own distribution."""
+    """Temperature 1.0 (no top-p/top-k) keeps sampled logprobs equal to the model's own distribution.
+
+    Re-running with the same --output resumes: tasks already finished without an error are skipped.
+    Live progress goes to status.json next to --output (see `python -m sd.dashboard`).
+    """
+    if split not in ("all", "train", "eval"):
+        raise typer.BadParameter("--split must be all, train or eval")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
-    asyncio.run(main_async(policy, model_name, n_tasks, seed, output, max_turns, max_context, max_tokens, temperature))
+    asyncio.run(main_async(
+        policy, model_name, split, split_size, n_tasks, seed, output, max_turns, max_context, max_tokens,
+        temperature, max_concurrency, metrics_port,
+    ))
 
 
 if __name__ == "__main__":

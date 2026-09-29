@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 10s
+scrape_configs:
+  # sd.harbor_rollouts --metrics-port 9101
+  - job_name: rollout
+    static_configs: [{targets: ["host.docker.internal:9101"]}]
+  # vLLM through the SSH tunnel opened by `infra/vllm_host.py up`
+  - job_name: vllm
+    static_configs: [{targets: ["host.docker.internal:8000"]}]
+    authorization: {credentials_file: /etc/prometheus/vllm_api_key}

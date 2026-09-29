@@ -3962,6 +3962,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "httpx" },
     { name = "modal" },
+    { name = "prometheus-client" },
     { name = "tinker-cookbook" },
     { name = "typer" },
 ]
@@ -3980,6 +3981,7 @@ infra = [
 requires-dist = [
     { name = "httpx", specifier = ">=0.28" },
     { name = "modal", specifier = ">=1.5.5" },
+    { name = "prometheus-client", specifier = ">=0.20" },
     { name = "tinker-cookbook", specifier = ">=0.5.7" },
     { name = "typer", specifier = ">=0.12" },
 ]
