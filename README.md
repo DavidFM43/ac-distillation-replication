@@ -60,8 +60,6 @@ Each JSONL line holds:
 - `turns`: per assistant turn, `prompt_len` and the exact sampled `tokens` and `logprobs`.
   Re-render `messages` up to that turn with `Qwen35AgentRenderer` to get the prompt tokens back.
 
-```bash
-
 ## Self-hosted vLLM (RunPod or AWS via SkyPilot)
 
 `infra/vllm_host.py` runs vLLM on a rented GPU and reaches it over an SSH tunnel.
