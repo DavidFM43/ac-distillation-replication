@@ -40,31 +40,53 @@ ENDPOINT_FILE = Path(".vllm_endpoint.json")
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
 
-def load_deployment(path: Path) -> tuple[str, dict[str, str], Path]:
-    """Split a deployment file into its pinned engine, engine env vars, and a vLLM config file to mount."""
+def load_deployment(path: Path) -> tuple[str, str | None, dict[str, str], Path]:
+    """Split a deployment file into its pinned engine, CUDA build, engine env vars, and a vLLM config to mount."""
     deployment = yaml.safe_load(path.read_text())
-    if not {"engine", "vllm"} <= set(deployment) <= {"engine", "env", "vllm"}:
-        raise typer.BadParameter(f"{path} must have `engine:` and `vllm:` keys, and optionally `env:`")
+    if not {"engine", "vllm"} <= set(deployment) <= {"engine", "cuda", "env", "vllm"}:
+        raise typer.BadParameter(f"{path} must have `engine:` and `vllm:` keys, and optionally `cuda:` and `env:`")
     if not re.fullmatch(r"vllm==[\w.+-]+", deployment["engine"]):
         raise typer.BadParameter("engine must be an exact pin, e.g. vllm==0.30.0")
+    cuda = deployment.get("cuda")
+    if cuda is not None and not re.fullmatch(r"cu\d{3}", cuda):
+        raise typer.BadParameter("cuda must look like cu129")
     if "tensor-parallel-size" in deployment["vllm"]:
         raise typer.BadParameter("tensor-parallel-size comes from --gpus, not the deployment file")
     vllm_config = Path(tempfile.mkdtemp()) / "vllm.yaml"
     vllm_config.write_text(yaml.safe_dump(deployment["vllm"], sort_keys=False))
     env = {str(k): str(v) for k, v in (deployment.get("env") or {}).items()}
-    return deployment["engine"], env, vllm_config
+    return deployment["engine"], cuda, env, vllm_config
+
+
+def install_spec(engine: str, cuda: str | None) -> tuple[str, str]:
+    """(uv pip install arguments, venv suffix) for the pinned engine.
+
+    With `cuda`, install vLLM's CUDA-specific wheel from its GitHub release together with the
+    matching PyTorch build. The PyPI wheel targets the newest CUDA, which needs a newer driver
+    than many RunPod hosts have; a CUDA 12.x build runs on those and on newer drivers alike.
+    """
+    if cuda is None:
+        return f"'{engine}'", engine.replace("==", "-")
+    version = engine.removeprefix("vllm==")
+    wheel = (
+        f"https://github.com/vllm-project/vllm/releases/download/v{version}/"
+        f"vllm-{version}%2B{cuda}-cp38-abi3-manylinux_2_28_x86_64.whl"
+    )
+    return f"--torch-backend={cuda} 'vllm @ {wheel}'", f"vllm-{version}-{cuda}"
 
 
 def build_task(deployment: Path, gpus: str, backend: str, api_key: str, disk_size: int) -> sky.Task:
-    engine, env, vllm_config = load_deployment(deployment)
-    # One venv per engine version, with its own Python, independent of the base image.
-    venv = "~/venv-" + engine.replace("==", "-")
+    engine, cuda, env, vllm_config = load_deployment(deployment)
+    install_args, venv_suffix = install_spec(engine, cuda)
+    # One venv per engine build, with its own Python, independent of the base image.
+    venv = f"~/venv-{venv_suffix}"
     setup = (
         "set -e; export PATH=$HOME/.local/bin:$PATH; "
         f"if [ ! -x {venv}/bin/vllm ]; then "
         "command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh; "
-        f"uv venv {venv} --python 3.12; "
-        f"uv pip install --python {venv}/bin/python '{engine}'; "
+        # --clear: an interrupted install leaves a venv without `vllm`; start it over.
+        f"uv venv --clear {venv} --python 3.12; "
+        f"uv pip install --python {venv}/bin/python {install_args}; "
         "fi"
     )
     run = (
@@ -161,6 +183,7 @@ def up(
     api_key = secrets.token_urlsafe(32)
     task = build_task(config, gpus, backend, api_key, disk_size)
 
+    existed = bool(sky.get(sky.status([cluster])))
     typer.echo(f"Launching {cluster} on {backend} with {gpus} (deleted after {max_minutes} min)...")
     try:
         sky.stream_and_get(
@@ -173,7 +196,11 @@ def up(
             )
         )
     except BaseException:
-        # A launch can fail after the node exists (e.g. SSH never comes up), before the
+        if existed:
+            # Relaunching onto a cluster that was already up: leave it for the user to inspect.
+            typer.echo(f"Launch failed on existing cluster {cluster}; it's still up (`sky down {cluster}` to delete)")
+            raise
+        # A fresh launch can fail after the node exists (e.g. SSH never comes up), before the
         # lifetime cap is armed: delete it rather than leave it billing.
         typer.echo(f"Launch failed; deleting {cluster} if it was created...")
         try:

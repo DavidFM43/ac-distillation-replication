@@ -32,6 +32,9 @@ Notes from the first deployment (vLLM 0.30.0, A40):
 
 - The `vllm/vllm-openai` image's `vllm serve` entrypoint swallows SkyPilot's SSH setup on
   RunPod, which is why vLLM is pip-installed instead.
+- vLLM's PyPI wheel is built for CUDA 13 and fails on RunPod hosts with older drivers (e.g. 570,
+  CUDA 12.8), so the deployment installs vLLM's CUDA 12.9 build (`cuda: cu129`) with the
+  matching PyTorch, which runs on old and new drivers alike.
 - FlashInfer's sampler JIT-compiles a kernel and needs `nvcc`, which the base images lack, so
   the deployment sets `VLLM_USE_FLASHINFER_SAMPLER=0`.
 - Prefix caching works for Qwen3.5's hybrid layers, in 528-token blocks.
