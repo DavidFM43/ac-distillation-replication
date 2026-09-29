@@ -7,6 +7,9 @@
 # Installed with pip on the node (the vllm/vllm-openai image's `vllm serve` entrypoint
 # swallows SkyPilot's SSH setup on RunPod).
 engine: vllm==0.30.0
+# vLLM's CUDA 12.9 build (+ matching PyTorch). The PyPI wheel is built for CUDA 13 and fails on
+# hosts with older drivers (e.g. driver 570 / CUDA 12.8 on a RunPod RTX A6000); cu129 runs on both.
+cuda: cu129
 
 # Environment for `vllm serve`.
 env:
@@ -20,7 +23,7 @@ vllm:
   revision: c202236235762e1c871ad0ccb60c8ee5ba337b9a  # pinned HF commit
   dtype: bfloat16             # same precision as Tinker; FP8 would shift logprobs
   language-model-only: true   # text-only workload, skip the vision encoder
-  max-model-len: 131072
+  max-model-len: 262144        # Qwen3.5-9B native context; rollouts may use all of it
 
   # Agent turns re-send the whole conversation; prefix reuse is what makes this cheap.
   # Experimental for Qwen3.5's hybrid (linear-attention) layers in vLLM: check the
