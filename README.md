@@ -98,6 +98,12 @@ Notes from the first deployment (vLLM 0.30.0, A40):
 - MTP speculative decoding is left off because of an open vLLM report of garbled tool calls
   with prefix caching on these models.
 
+**CPU KV-cache offloading (untested):** `vllm_host.py up --cpu-offload auto` gives vLLM a RAM tier
+for evicted KV-cache blocks (`--kv-offloading-size`, native backend). With `auto`, the size is the
+node's available memory, capped by the container's cgroup limit, minus 12 GiB. It's off by default
+until verified on a pod: a hybrid-GDN model can silently write to RAM without ever reading back
+(vllm-project/vllm#58653, triggered by an explicit `--block-size`, which this deployment doesn't set).
+
 ## Qwen3.5 on a self-hosted vLLM server
 
 `sd/vllm_policy.py` provides the vLLM backend for rollouts. `make_vllm_policy(model_name,

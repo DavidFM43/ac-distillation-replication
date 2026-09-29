@@ -30,5 +30,9 @@ vllm:
   # prefix-cache hit rate in /metrics before trusting throughput numbers.
   enable-prefix-caching: true
 
+  # CPU offloading of evicted KV-cache blocks (native backend). Inactive unless
+  # `vllm_host.py up --cpu-offload auto|<GiB>` passes a size, which depends on the node's RAM.
+  kv-offloading-backend: native
+
   # No MTP speculative decoding: vLLM has an open report of garbled tool calls on
   # prefix-cache hits with MTP enabled on Qwen3.5-style hybrid models.

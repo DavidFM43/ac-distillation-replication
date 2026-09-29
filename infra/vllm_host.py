@@ -75,7 +75,33 @@ def install_spec(engine: str, cuda: str | None) -> tuple[str, str]:
     return f"--torch-backend={cuda} 'vllm @ {wheel}'", f"vllm-{version}-{cuda}"
 
 
-def build_task(deployment: Path, gpus: str, backend: str, api_key: str, disk_size: int) -> sky.Task:
+OFFLOAD_RESERVE_GIB = 12  # left for the OS, the vLLM/Python processes and page cache
+
+
+def cpu_offload_snippet(cpu_offload: str) -> str:
+    """Shell that sets $OFFLOAD_ARGS for `vllm serve` (KV-cache offloading to CPU memory).
+
+    "0": off. "<N>": N GiB. "auto": the node's available memory, capped by the container's cgroup
+    limit (RunPod's /proc/meminfo can show the whole host), minus OFFLOAD_RESERVE_GIB. Sized on the
+    node because it depends on the machine, like --tensor-parallel-size.
+    """
+    if cpu_offload == "0":
+        return 'OFFLOAD_ARGS=""'
+    if cpu_offload != "auto":
+        return f'OFFLOAD_ARGS="--kv-offloading-size {int(cpu_offload)}"'
+    return (
+        'mem_kb=$(awk \'/MemAvailable/ {print $2}\' /proc/meminfo); '
+        'lim=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || echo max); '
+        'case "$lim" in max|"") ;; *) lim_kb=$((lim / 1024)); [ "$lim_kb" -lt "$mem_kb" ] && mem_kb=$lim_kb ;; esac; '
+        f"gib=$(( mem_kb / 1048576 - {OFFLOAD_RESERVE_GIB} )); "
+        'if [ "$gib" -gt 0 ]; then OFFLOAD_ARGS="--kv-offloading-size $gib"; else OFFLOAD_ARGS=""; fi; '
+        'echo "CPU KV offload: ${gib} GiB"'
+    )
+
+
+def build_task(
+    deployment: Path, gpus: str, backend: str, api_key: str, disk_size: int, cpu_offload: str = "0"
+) -> sky.Task:
     engine, cuda, env, vllm_config = load_deployment(deployment)
     install_args, venv_suffix = install_spec(engine, cuda)
     # One venv per engine build, with its own Python, independent of the base image.
@@ -90,8 +116,9 @@ def build_task(deployment: Path, gpus: str, backend: str, api_key: str, disk_siz
         "fi"
     )
     run = (
+        f"{cpu_offload_snippet(cpu_offload)}; "
         f"{venv}/bin/vllm serve --config {REMOTE_CONFIG} --host 127.0.0.1 --port {REMOTE_PORT} "
-        "--tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE"
+        "--tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE $OFFLOAD_ARGS"
     )
     task = sky.Task(
         name="vllm",
@@ -176,12 +203,17 @@ def up(
     max_minutes: int = typer.Option(240, help="Delete the cluster after this long, unconditionally"),
     disk_size: int = typer.Option(100, help="Disk GB (image + weights)"),
     ready_timeout: int = typer.Option(1800, help="Seconds to wait for the model to load"),
+    cpu_offload: str = typer.Option(
+        "0", help="KV-cache offload to CPU memory: GiB, 'auto' (node memory minus a reserve), or 0 = off (untested)"
+    ),
 ) -> None:
     """Launch vLLM, open the tunnel, wait until it serves, write .vllm_endpoint.json."""
     if backend not in ("runpod", "aws"):
         raise typer.BadParameter("--backend must be runpod or aws")
+    if cpu_offload != "auto" and not (cpu_offload.isdigit()):
+        raise typer.BadParameter("--cpu-offload must be a number of GiB, 'auto' or 0")
     api_key = secrets.token_urlsafe(32)
-    task = build_task(config, gpus, backend, api_key, disk_size)
+    task = build_task(config, gpus, backend, api_key, disk_size, cpu_offload)
 
     existed = bool(sky.get(sky.status([cluster])))
     typer.echo(f"Launching {cluster} on {backend} with {gpus} (deleted after {max_minutes} min)...")
