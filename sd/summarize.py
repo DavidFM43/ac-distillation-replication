@@ -32,7 +32,12 @@ def rate(label: str, k: int, n: int) -> str:
 
 
 def main(path: Path, threshold: int = 40) -> None:
-    records = [json.loads(line) for line in path.read_text().splitlines()]
+    # A resumed run can append a retried task again; keep the latest record per task.
+    latest = {}
+    for line in path.read_text().splitlines():
+        record = json.loads(line)
+        latest[record["instance_id"]] = record
+    records = list(latest.values())
     errored = [r for r in records if r["error"]]
     ok = [r for r in records if not r["error"]]
     n = len(ok)

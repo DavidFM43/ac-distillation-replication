@@ -60,6 +60,31 @@ Each JSONL line holds:
 - `turns`: per assistant turn, `prompt_len` and the exact sampled `tokens` and `logprobs`.
   Re-render `messages` up to that turn with `Qwen35AgentRenderer` to get the prompt tokens back.
 
+### Large runs
+
+```bash
+uv run python -m sd.harbor_rollouts --policy sd.vllm_policy:make_vllm_policy \
+    --split train --max-context 262144 --max-concurrency 12 --output runs/train250/trajectories.jsonl
+```
+
+- **Split:** `--split train|eval` takes a fixed-seed shuffle of the 500 SWE-bench Verified tasks.
+  `train` is the first `--split-size` (250) and `eval` the rest, held out for evaluating a
+  trained model. The first 10 of the shuffle are the earlier baseline tasks.
+- **Concurrency:** `--max-concurrency` caps how many tasks run at once (sandboxes plus model
+  requests). On a 48 GB GPU, each conversation's KV cache must fit alongside the others', so
+  keep it around 12 without a context cap. At 25, the prefix-cache hit rate collapsed to 0%.
+- **Resume:** re-running with the same `--output` skips finished tasks and retries errored ones.
+
+Live progress:
+
+- `status.json` (next to `--output`) holds each task's state, turns and tokens.
+- `uv run python -m sd.dashboard runs/train250` serves a task-level page at
+  http://127.0.0.1:8765.
+- Prometheus metrics are exposed on `--metrics-port` (9101).
+- `monitoring/up.sh` starts a local Prometheus + Grafana (Docker) at http://127.0.0.1:3000,
+  with a rollout dashboard and vLLM's official one. Re-run it after each `vllm_host.py up`, since
+  each deployment gets a new API key.
+
 ## Self-hosted vLLM (RunPod or AWS via SkyPilot)
 
 `infra/vllm_host.py` runs vLLM on a rented GPU and reaches it over an SSH tunnel.

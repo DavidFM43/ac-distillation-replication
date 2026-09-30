@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rollout Dashboard</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --line: #e4e4df;
+    --running: #2f6fdb; --done: #2e8b57; --error: #c0392b; --queued: #9a9a93; --warn: #b7791f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141413; --panel: #1f1f1d; --text: #ecece7; --muted: #9d9d96; --line: #33332f;
+      --running: #6b9bf0; --done: #5cbf86; --error: #e0685b; --queued: #77776f; --warn: #d9a441;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 1200px; margin: 0 auto; padding: 20px 16px 40px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 16px; }
+  h1 { font-size: 20px; margin: 0; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .stale { color: var(--warn); font-weight: 600; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .card .label { color: var(--muted); font-size: 12px; }
+  .card .value { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .card .sub { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--line); margin-bottom: 18px; }
+  .bar span { display: block; height: 100%; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; align-items: center; }
+  .controls button { background: var(--panel); color: var(--text); border: 1px solid var(--line);
+                     border-radius: 14px; padding: 3px 11px; font: inherit; font-size: 13px; cursor: pointer; }
+  .controls button.on { border-color: var(--text); font-weight: 600; }
+  .tablewrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { padding: 6px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; cursor: pointer; user-select: none; position: sticky; top: 0; background: var(--panel); }
+  tr:last-child td { border-bottom: none; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; color: #fff; }
+  .s-running { background: var(--running); } .s-done { background: var(--done); }
+  .s-error { background: var(--error); } .s-queued { background: var(--queued); }
+  .pass { color: var(--done); font-weight: 600; } .fail { color: var(--error); }
+  .muted { color: var(--muted); }
+  #err { color: var(--error); margin: 8px 0; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Rollout Dashboard</h1>
+    <span class="meta" id="meta">loading…</span>
+  </header>
+  <div id="err"></div>
+  <div class="cards" id="cards"></div>
+  <div class="bar" id="bar"></div>
+  <div class="controls" id="filters"></div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr id="head"></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+</main>
+<script>
+const COLS = [
+  ["instance_id", "Task"], ["state", "State"], ["turns", "Turns"], ["prompt_len", "Context"],
+  ["input_new", "Input new"], ["input_cached", "Input cached"], ["output", "Output"],
+  ["elapsed", "Elapsed"], ["outcome", "Outcome"],
+];
+const STATE_ORDER = { running: 0, queued: 1, error: 2, done: 3 };
+let data = null, filter = "all", sortKey = "state", sortDir = 1;
+
+const fmt = n => n == null ? "–" : n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n);
+const dur = s => { if (s == null) return "–"; s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
+                   return h ? `${h}h ${m}m` : m ? `${m}m ${s % 60}s` : `${s}s`; };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function elapsed(t, now) {
+  if (!t.started_at) return null;
+  return (t.finished_at || now) - t.started_at;
+}
+function outcome(t) {
+  if (t.state === "error") return { text: "error", cls: "fail", title: t.error || "" };
+  if (t.state !== "done") return { text: "–", cls: "muted" };
+  const sub = t.submitted ? `submitted t${t.submit_turn}` : `not submitted (${t.stop_reason})`;
+  return { text: `${sub} · ${t.tests_passed ? "pass" : "fail"}`, cls: t.tests_passed ? "pass" : "fail" };
+}
+
+function render() {
+  const now = Date.now() / 1000, c = data.counts, T = data.totals, total = data.tasks.length;
+  const age = now - data.updated_at;
+  const cfg = data.config;
+  document.getElementById("meta").innerHTML =
+    `${esc(cfg.split)} split · ${esc(cfg.policy)} · concurrency ${cfg.max_concurrency} · running for ${dur(now - data.started_at)} · ` +
+    (age > 120 ? `<span class="stale">last update ${dur(age)} ago</span>` : `updated ${dur(age)} ago`);
+
+  const finished = c.done;
+  const cards = [
+    ["Running", c.running, `of ${cfg.max_concurrency} slots`],
+    ["Completed", `${c.done} / ${total}`, `${c.queued} queued · ${c.error} errors`],
+    ["Submitted", finished ? `${T.submitted}/${finished}` : "–", finished ? `${Math.round(100 * T.submitted / finished)}% of completed` : ""],
+    ["Tests pass", finished ? `${T.tests_passed}/${finished}` : "–", finished ? `${Math.round(100 * T.tests_passed / finished)}% of completed` : ""],
+    ["Turns", fmt(T.turns), total ? `${(T.turns / Math.max(1, c.done + c.running + c.error)).toFixed(0)} per started task` : ""],
+    ["Input tokens", fmt(T.input_new + T.input_cached), `${fmt(T.input_new)} new · ${fmt(T.input_cached)} cached`],
+    ["Output tokens", fmt(T.output), ""],
+  ];
+  document.getElementById("cards").innerHTML = cards.map(([l, v, s]) =>
+    `<div class="card"><div class="label">${l}</div><div class="value">${v}</div><div class="sub">${s}</div></div>`).join("");
+
+  document.getElementById("bar").innerHTML = ["done", "error", "running", "queued"].map(s =>
+    `<span class="s-${s}" style="width:${100 * c[s] / Math.max(1, total)}%" title="${s}: ${c[s]}"></span>`).join("");
+
+  document.getElementById("filters").innerHTML = ["all", "running", "queued", "done", "error"].map(f =>
+    `<button class="${f === filter ? "on" : ""}" data-f="${f}">${f} (${f === "all" ? total : c[f]})</button>`).join("");
+
+  document.getElementById("head").innerHTML = COLS.map(([k, l]) =>
+    `<th data-k="${k}">${l}${k === sortKey ? (sortDir > 0 ? " ▲" : " ▼") : ""}</th>`).join("");
+
+  const rows = data.tasks.filter(t => filter === "all" || t.state === filter).map(t => ({ ...t, elapsed: elapsed(t, now), _o: outcome(t) }));
+  const key = r => sortKey === "state" ? STATE_ORDER[r.state] * 1e9 - (r.elapsed || 0)
+                 : sortKey === "outcome" ? r._o.text : (r[sortKey] ?? -1);
+  rows.sort((a, b) => { const x = key(a), y = key(b); return (x > y ? 1 : x < y ? -1 : 0) * sortDir; });
+
+  document.getElementById("rows").innerHTML = rows.map(r => `<tr>
+    <td>${esc(r.instance_id)}</td>
+    <td><span class="pill s-${r.state}">${r.state}</span></td>
+    <td>${r.turns ?? "–"}</td><td>${fmt(r.prompt_len)}</td>
+    <td>${fmt(r.input_new)}</td><td>${fmt(r.input_cached)}</td><td>${fmt(r.output)}</td>
+    <td>${dur(r.elapsed)}</td>
+    <td class="${r._o.cls}" title="${esc(r._o.title || "")}">${esc(r._o.text)}</td></tr>`).join("");
+}
+
+document.addEventListener("click", e => {
+  if (e.target.dataset.f) { filter = e.target.dataset.f; render(); }
+  if (e.target.dataset.k) { const k = e.target.dataset.k; sortDir = k === sortKey ? -sortDir : 1; sortKey = k; render(); }
+});
+
+async function refresh() {
+  try {
+    const r = await fetch("status.json?" + Date.now(), { cache: "no-store" });
+    if (!r.ok) throw new Error(r.status === 404 ? "No status.json yet: the run hasn't started." : `HTTP ${r.status}`);
+    data = await r.json();
+    document.getElementById("err").textContent = "";
+    render();
+  } catch (e) {
+    document.getElementById("err").textContent = e.message;
+  }
+}
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
