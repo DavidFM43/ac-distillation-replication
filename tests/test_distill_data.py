@@ -52,7 +52,7 @@ def make_record(renderer, n_turns: int, no_thinking_turns=(), split_turns=(), **
 
 def test_teacher_is_student_plus_hint_and_targets_line_up(renderer):
     record = make_record(renderer, 6)
-    ex = build_example(record, 4, renderer)
+    ex = build_example(record, 4, renderer, n_turns=1)
     suffix = renderer.build_generation_prompt([]).to_ints()
     body = ex.student_prompt[: len(ex.student_prompt) - len(suffix)]
     hint_block = ex.teacher_prompt[len(body): len(ex.teacher_prompt) - len(suffix)]
@@ -93,6 +93,8 @@ def test_supervised_turns_stop_at_the_end_of_the_trajectory(renderer):
     record = make_record(renderer, 6)
     ex = build_example(record, 5, renderer, n_turns=4)
     assert ex.n_supervised == 2 and ex.target[-len(record["turns"][5]["tokens"]):] == record["turns"][5]["tokens"]
+    rest = build_example(record, 3, renderer)  # no n_turns: the whole rest of the trajectory
+    assert rest.n_supervised == 4 and rest.target[-len(record["turns"][5]["tokens"]):] == record["turns"][5]["tokens"]
 
 
 def test_hint_turn_is_seeded_per_task_and_capped_by_length(renderer):
@@ -107,7 +109,7 @@ def test_only_late_trajectories_become_examples(renderer):
     late = make_record(renderer, 4)
     early = make_record(renderer, 4, instance_id="repo__repo-2", submitted=True, submit_turn=3)
     errored = make_record(renderer, 4, instance_id="repo__repo-3", error="SandboxError")
-    examples, skipped = build_examples([late, early, errored], renderer, hint_min=2, hint_max=3)
+    examples, skipped = build_examples([late, early, errored], renderer, hint_min=2, hint_max=3, n_turns=1)
     assert [e.instance_id for e in examples] == ["repo__repo-1"] and skipped == {}
     assert is_late(make_record(renderer, 1, submitted=True, submit_turn=41))
 

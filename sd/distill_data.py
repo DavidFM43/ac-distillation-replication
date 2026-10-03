@@ -1,15 +1,16 @@
 """Offline self-distillation examples: hinted teacher vs unhinted student on stored trajectories.
 
-    uv run python -m sd.distill_data runs/train250/trajectories.jsonl --output runs/distill/examples.jsonl
-    uv run python -m sd.distill_data runs/train250/trajectories.jsonl --n-turns 5 \
-        --output runs/distill/examples_n5.jsonl
+    uv run python -m sd.distill_data runs/train250/trajectories.jsonl --output runs/distill/examples_all.jsonl
+    uv run python -m sd.distill_data runs/train250/trajectories.jsonl --n-turns 1 \
+        --output runs/distill/examples.jsonl
 
 For each trajectory that didn't submit by the turn limit, pick one assistant turn t in
 [hint_min, hint_max] (seeded per task). Then:
 
 - student sequence: the conversation up to turn t, rendered exactly as the model saw it, followed by
   the target: turns t..t+n_turns-1 as the model actually sampled them, with the tool outputs between
-  them (fewer turns if the trajectory ends sooner; turns past the limit count too)
+  them (fewer turns if the trajectory ends sooner; turns past the limit count too). Without n_turns,
+  the target is the whole rest of the trajectory.
 - teacher sequence: the same conversation plus a hint user message right before turn t, followed by
   the same target tokens
 
@@ -105,10 +106,12 @@ def rendered_prompt(record: dict, messages: list[Message], assistant_idx: list[i
     return prompt
 
 
-def build_example(record: dict, turn: int, renderer: Qwen35AgentRenderer, n_turns: int = 1) -> Example:
+def build_example(record: dict, turn: int, renderer: Qwen35AgentRenderer, n_turns: int | None = None) -> Example:
     messages = [from_jsonable(m) for m in record["messages"]]
     assistant_idx = [i for i, m in enumerate(messages) if m["role"] == "assistant"]
-    last = min(turn + n_turns - 1, len(assistant_idx), len(record["turns"]))
+    last = min(len(assistant_idx), len(record["turns"]))
+    if n_turns is not None:
+        last = min(last, turn + n_turns - 1)
     hint = hint_text(turn)
     hint_message = {"role": "user", "content": hint}
     im_end = renderer.tokenizer.convert_tokens_to_ids(IM_END)
@@ -159,7 +162,7 @@ def build_example(record: dict, turn: int, renderer: Qwen35AgentRenderer, n_turn
 
 
 def build_examples(records: list[dict], renderer: Qwen35AgentRenderer, seed: int = 0, hint_min: int = 30,
-                   hint_max: int = 39, n_turns: int = 1) -> tuple[list[Example], dict[str, str]]:
+                   hint_max: int = 39, n_turns: int | None = None) -> tuple[list[Example], dict[str, str]]:
     """Examples, plus the skipped tasks with why (e.g. the hint changed more than the context's end)."""
     examples, skipped = [], {}
     for record in records:
@@ -186,7 +189,9 @@ def load_records(path: Path) -> list[dict]:
 
 def main(trajectories: Path, output: Path = Path("runs/distill/examples.jsonl"), seed: int = 0,
          hint_min: int = 30, hint_max: int = 39,
-         n_turns: int = typer.Option(1, help="Assistant turns to supervise, starting at the hint turn")) -> None:
+         n_turns: int | None = typer.Option(
+             None, help="Assistant turns to supervise, starting at the hint turn (default: the rest of the trajectory)"
+         )) -> None:
     records = load_records(trajectories)
     renderer = get_agent_renderer(records[0]["model_name"])
     examples, skipped = build_examples(records, renderer, seed, hint_min, hint_max, n_turns)
