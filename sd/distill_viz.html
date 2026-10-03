@@ -104,7 +104,7 @@ function renderList() {
   $("count").textContent = `${shown.length} of ${index.length} examples`;
   $("list").innerHTML = shown.map(e => `<div class="item ${e.instance_id === current ? "sel" : ""}" data-id="${esc(e.instance_id)}">
     <div class="id">${esc(e.instance_id)}</div>
-    <div class="sub">hint t${e.hint_turn} · target ${e.target_len} tok · ctx ${k(e.context_len)} · ${esc(outcomeText(e))} · ${e.tests_passed ? "pass" : "fail"}</div></div>`).join("");
+    <div class="sub">hint t${e.hint_turn}${e.n_supervised > 1 ? ` · ${e.n_supervised} turns` : ""} · target ${e.target_len} tok · ctx ${k(e.context_len)} · ${esc(outcomeText(e))} · ${e.tests_passed ? "pass" : "fail"}</div></div>`).join("");
 }
 
 function turnBlock(t, kind, openAll) {
@@ -130,11 +130,12 @@ async function show(id) {
   $("main").innerHTML = `<div class="empty">loading ${esc(id)}…</div>`;
   const d = await (await fetch("/example/" + encodeURIComponent(id))).json();
   if (current !== id) return;
-  const o = d.outcome, h = d.hint_turn;
-  const before = d.turns.filter(t => t.turn < h), target = d.turns.find(t => t.turn === h), after = d.turns.filter(t => t.turn > h);
+  const o = d.outcome, h = d.hint_turn, end = h + d.n_supervised;  // supervised turns: h..end-1
+  const before = d.turns.filter(t => t.turn < h), targets = d.turns.filter(t => t.turn >= h && t.turn < end),
+    after = d.turns.filter(t => t.turn >= end);
   $("main").innerHTML = `
     <div class="head"><h2>${esc(d.instance_id)}</h2>
-      <div class="chips"><span class="chip">hint before turn ${h}</span><span class="chip">target ${d.target_len} tokens</span>
+      <div class="chips"><span class="chip">hint before turn ${h}</span><span class="chip">${d.n_supervised > 1 ? `trained turns ${h}–${end - 1} · ` : ""}target ${d.target_len} tokens</span>
         <span class="chip">teacher +${d.teacher_extra} tokens</span><span class="chip">${o.n_turns} turns total</span>
         <span class="chip">${esc(outcomeText(o))}</span><span class="chip ${o.tests_passed ? "pass" : "fail"}">tests ${o.tests_passed ? "pass" : "fail"}</span></div></div>
     <div class="toolbar"><button data-act="expand">Expand all</button><button data-act="collapse">Collapse all</button>
@@ -143,7 +144,7 @@ async function show(id) {
     <div class="section">Context: turns 1–${h - 1} (the student and teacher both see these)</div>
     ${before.map(t => turnBlock(t, "context")).join("")}
     <div class="hint" id="hint"><div class="label">Hint · teacher only · user message inserted here</div><div class="prose">${esc(d.hint)}</div></div>
-    ${target ? turnBlock(target, "target") : ""}
+    ${targets.map(t => turnBlock(t, "target")).join("")}
     <div class="section">What the model did next (not trained)</div>
     ${after.map(t => turnBlock(t, "after")).join("")}`;
   $("main").scrollTop = 0;

@@ -21,7 +21,16 @@ def turn_text(i: int, thinking: bool = True) -> str:
     return f"Step {i} reasoning.\n</think>\n\nRunning step {i}.\n\n{call}" if thinking else f"Running step {i}.\n\n{call}"
 
 
-def make_record(renderer, n_turns: int, no_thinking_turns=(), **overrides) -> dict:
+def split_one_token(renderer, tokens: list[int]) -> list[int]:
+    """The same text with one word token split into single characters, as a model can sample it."""
+    tok = renderer.tokenizer
+    i = next(i for i, t in enumerate(tokens) if tok.decode([t]).strip().isalpha() and len(tok.decode([t])) >= 4)
+    chars = [tok.encode(c, add_special_tokens=False)[0] for c in tok.decode([tokens[i]])]
+    assert tok.decode(chars) == tok.decode([tokens[i]])
+    return tokens[:i] + chars + tokens[i + 1:]
+
+
+def make_record(renderer, n_turns: int, no_thinking_turns=(), split_turns=(), **overrides) -> dict:
     """A stored trajectory as sd.harbor_rollouts writes it: messages plus per-turn tokens."""
     messages = [{"role": "system", "content": "You are helpful."}, {"role": "user", "content": "Fix the bug."}]
     turns = []
@@ -29,6 +38,8 @@ def make_record(renderer, n_turns: int, no_thinking_turns=(), **overrides) -> di
         prompt = renderer.build_generation_prompt(messages).to_ints()
         tokens = renderer.tokenizer.encode(turn_text(i, i not in no_thinking_turns), add_special_tokens=False)
         tokens.append(renderer.tokenizer.convert_tokens_to_ids(IM_END))
+        if i in split_turns:
+            tokens = split_one_token(renderer, tokens)
         assistant, _ = renderer.parse_response(tokens)
         call_id = assistant["tool_calls"][0].id or "call_0"
         messages += [assistant, {"role": "tool", "content": f"out {i}", "tool_call_id": call_id, "name": "bash"}]
@@ -50,6 +61,41 @@ def test_teacher_is_student_plus_hint_and_targets_line_up(renderer):
     assert ex.teacher_prompt == body + hint_block + suffix
     assert "40-turn limit" in renderer.tokenizer.decode(hint_block) and "37 turns left" in ex.hint
     assert ex.target == record["turns"][3]["tokens"] and len(ex.target_logprobs) == len(ex.target)
+    assert ex.n_supervised == 1 and ex.target_mask == [1] * len(ex.target)
+
+
+def test_several_supervised_turns_mask_out_tool_outputs(renderer):
+    record = make_record(renderer, 6)
+    ex = build_example(record, 2, renderer, n_turns=3)
+    turns = record["turns"]
+
+    # Student prompt + target = turn 4's prompt as the model saw it + turn 4's sampled tokens.
+    assert len(ex.student_prompt) + len(ex.target) == turns[3]["prompt_len"] + len(turns[3]["tokens"])
+    assert ex.n_supervised == 3 and ex.target[-len(turns[3]["tokens"]):] == turns[3]["tokens"]
+    # The masked-in tokens are exactly turns 2-4's tokens, with their logprobs (here re-encoding the text
+    # gives back the sampled tokens, so every turn keeps its logprobs).
+    assert [t for t, m in zip(ex.target, ex.target_mask) if m] == sum((turns[i]["tokens"] for i in (1, 2, 3)), [])
+    assert all((lp is None) == (m == 0) for lp, m in zip(ex.target_logprobs, ex.target_mask))
+    between = renderer.tokenizer.decode([t for t, m in zip(ex.target, ex.target_mask) if not m])
+    assert "out 2" in between and "out 3" in between and "out 4" not in between  # tool outputs between turns
+
+
+def test_earlier_turns_use_the_tokens_the_model_had_in_context(renderer):
+    # Turn 2 was sampled as a non-canonical split; turn 3's prompt re-encodes its text canonically.
+    record = make_record(renderer, 6, split_turns=(2,))
+    ex = build_example(record, 2, renderer, n_turns=3)
+    turns = record["turns"]
+    assert len(ex.student_prompt) + len(ex.target) == turns[3]["prompt_len"] + len(turns[3]["tokens"])
+    first = ex.target[: ex.target_mask.index(0)]  # turn 2 as the later turns saw it
+    assert first != turns[1]["tokens"] and renderer.tokenizer.decode(first) == renderer.tokenizer.decode(turns[1]["tokens"])
+    assert all(lp is None for lp in ex.target_logprobs[: len(first)])  # no logprobs for re-encoded tokens
+    assert ex.target_logprobs[-len(turns[3]["tokens"]):] == turns[3]["logprobs"]
+
+
+def test_supervised_turns_stop_at_the_end_of_the_trajectory(renderer):
+    record = make_record(renderer, 6)
+    ex = build_example(record, 5, renderer, n_turns=4)
+    assert ex.n_supervised == 2 and ex.target[-len(record["turns"][5]["tokens"]):] == record["turns"][5]["tokens"]
 
 
 def test_hint_turn_is_seeded_per_task_and_capped_by_length(renderer):
@@ -65,7 +111,7 @@ def test_only_late_trajectories_become_examples(renderer):
     early = make_record(renderer, 4, instance_id="repo__repo-2", submitted=True, submit_turn=3)
     errored = make_record(renderer, 4, instance_id="repo__repo-3", error="SandboxError")
     examples, skipped = build_examples([late, early, errored], renderer, hint_min=2, hint_max=3)
-    assert [e.instance_id for e in examples] == ["repo__repo-1"] and skipped == []
+    assert [e.instance_id for e in examples] == ["repo__repo-1"] and skipped == {}
     assert is_late(make_record(renderer, 1, submitted=True, submit_turn=41))
 
 
@@ -76,7 +122,7 @@ def test_hint_that_rerenders_earlier_context_is_skipped(renderer):
     with pytest.raises(HintChangesContext):
         build_example(record, 4, renderer)
     examples, skipped = build_examples([record], renderer, hint_min=4, hint_max=4)
-    assert examples == [] and skipped == ["repo__repo-1"]
+    assert examples == [] and list(skipped) == ["repo__repo-1"]
 
 
 def test_hint_counts_the_current_turn():

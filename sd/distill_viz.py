@@ -59,13 +59,19 @@ def conversation(record: dict, example: dict) -> dict:
     return {
         "instance_id": record["instance_id"],
         "hint_turn": example["hint_turn"],
+        "n_supervised": example.get("n_supervised", 1),
         "hint": example["hint"],
-        "target_len": len(example["target"]),
+        "target_len": supervised_len(example),
         "teacher_extra": len(example["teacher_prompt"]) - len(example["student_prompt"]),
         "outcome": {k: record[k] for k in ("submitted", "submit_turn", "tests_passed", "stop_reason", "n_turns")},
         "preamble": preamble,
         "turns": turns,
     }
+
+
+def supervised_len(example: dict) -> int:
+    """Trained tokens: the target minus tool outputs between turns (examples without a mask are all target)."""
+    return sum(example.get("target_mask") or [1] * len(example["target"]))
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -104,7 +110,8 @@ def main(examples_path: Path, trajectories: Path, port: int = 8766) -> None:
     records = {r["instance_id"]: r for r in load_records(trajectories)}
     examples = {e["instance_id"]: e for e in map(json.loads, examples_path.read_text().splitlines())}
     index = [
-        {"instance_id": iid, "hint_turn": e["hint_turn"], "target_len": len(e["target"]),
+        {"instance_id": iid, "hint_turn": e["hint_turn"], "n_supervised": e.get("n_supervised", 1),
+         "target_len": supervised_len(e),
          "context_len": len(e["student_prompt"]),
          **{k: records[iid][k] for k in ("submitted", "submit_turn", "tests_passed", "stop_reason", "n_turns")}}
         for iid, e in examples.items()
