@@ -60,7 +60,7 @@ def test_teacher_is_student_plus_hint_and_targets_line_up(renderer):
     assert len(ex.student_prompt) == record["turns"][3]["prompt_len"]  # exactly what the model saw
     assert ex.teacher_prompt == body + hint_block + suffix
     assert "40-turn limit" in renderer.tokenizer.decode(hint_block) and "37 turns left" in ex.hint
-    assert ex.target == record["turns"][3]["tokens"] and len(ex.target_logprobs) == len(ex.target)
+    assert ex.target == record["turns"][3]["tokens"]
     assert ex.n_supervised == 1 and ex.target_mask == [1] * len(ex.target)
 
 
@@ -72,10 +72,8 @@ def test_several_supervised_turns_mask_out_tool_outputs(renderer):
     # Student prompt + target = turn 4's prompt as the model saw it + turn 4's sampled tokens.
     assert len(ex.student_prompt) + len(ex.target) == turns[3]["prompt_len"] + len(turns[3]["tokens"])
     assert ex.n_supervised == 3 and ex.target[-len(turns[3]["tokens"]):] == turns[3]["tokens"]
-    # The masked-in tokens are exactly turns 2-4's tokens, with their logprobs (here re-encoding the text
-    # gives back the sampled tokens, so every turn keeps its logprobs).
+    # The masked-in tokens are exactly turns 2-4's tokens (here re-encoding the text gives back the sampled tokens).
     assert [t for t, m in zip(ex.target, ex.target_mask) if m] == sum((turns[i]["tokens"] for i in (1, 2, 3)), [])
-    assert all((lp is None) == (m == 0) for lp, m in zip(ex.target_logprobs, ex.target_mask))
     between = renderer.tokenizer.decode([t for t, m in zip(ex.target, ex.target_mask) if not m])
     assert "out 2" in between and "out 3" in between and "out 4" not in between  # tool outputs between turns
 
@@ -88,8 +86,7 @@ def test_earlier_turns_use_the_tokens_the_model_had_in_context(renderer):
     assert len(ex.student_prompt) + len(ex.target) == turns[3]["prompt_len"] + len(turns[3]["tokens"])
     first = ex.target[: ex.target_mask.index(0)]  # turn 2 as the later turns saw it
     assert first != turns[1]["tokens"] and renderer.tokenizer.decode(first) == renderer.tokenizer.decode(turns[1]["tokens"])
-    assert all(lp is None for lp in ex.target_logprobs[: len(first)])  # no logprobs for re-encoded tokens
-    assert ex.target_logprobs[-len(turns[3]["tokens"]):] == turns[3]["logprobs"]
+    assert ex.target[-len(turns[3]["tokens"]):] == turns[3]["tokens"]  # the last turn as sampled
 
 
 def test_supervised_turns_stop_at_the_end_of_the_trajectory(renderer):

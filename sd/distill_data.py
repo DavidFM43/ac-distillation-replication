@@ -67,9 +67,6 @@ class Example:
     teacher_prompt: list[int]
     target: list[int]  # the supervised turns' sampled tokens, with the tool outputs between them
     target_mask: list[int]  # per target token: 1 for the assistant turns, 0 for tool outputs/formatting
-    # Logprobs under the policy that sampled the tokens. None where the mask is 0, and for a turn whose
-    # re-rendered tokens differ from the sampled ones (see the module docstring).
-    target_logprobs: list[float | None]
 
 
 def hint_text(turn: int, limit: int = TURN_LIMIT) -> str:
@@ -135,15 +132,12 @@ def build_example(record: dict, turn: int, renderer: Qwen35AgentRenderer, n_turn
     target = prompts[-1][len(student_prompt):] + last_tokens
 
     # What each prompt adds is the previous assistant turn, through its end token, then the tool output.
-    mask, logprobs = [], []
-    for t, (prev, prompt) in enumerate(itertools.pairwise(prompts), start=turn):
+    mask = []
+    for prev, prompt in itertools.pairwise(prompts):
         added = prompt[len(prev):]
         n = added.index(im_end) + 1 if im_end in added else len(added)
-        sampled = record["turns"][t - 1]
         mask += [1] * n + [0] * (len(added) - n)
-        logprobs += (sampled["logprobs"] if added[:n] == sampled["tokens"] else [None] * n) + [None] * (len(added) - n)
     mask += [1] * len(last_tokens)
-    logprobs += record["turns"][last - 1]["logprobs"]
 
     # The teacher's own rendering of the later turns must match too: the hint changes nothing after it.
     teacher_last = renderer.build_generation_prompt(
@@ -161,7 +155,6 @@ def build_example(record: dict, turn: int, renderer: Qwen35AgentRenderer, n_turn
         teacher_prompt=teacher_prompt,
         target=target,
         target_mask=mask,
-        target_logprobs=logprobs,
     )
 
 
