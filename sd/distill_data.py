@@ -10,7 +10,9 @@ For each trajectory that didn't submit by the turn limit, pick one assistant tur
 - student sequence: the conversation up to turn t, rendered exactly as the model saw it, followed by
   the target: turns t..t+n_turns-1 as the model actually sampled them, with the tool outputs between
   them (fewer turns if the trajectory ends sooner; turns past the limit count too). Without n_turns,
-  the target is the whole rest of the trajectory.
+  the target is the whole rest of the trajectory. Supervision also stops early at a turn after which
+  re-rendering the history changes it (a turn without thinking), since one sequence can't match both
+  what the model saw before and after.
 - teacher sequence: the same conversation plus a hint user message right before turn t, followed by
   the same target tokens
 
@@ -25,7 +27,6 @@ of turns) the model had sampled a different token split of the same text than re
 earlier supervised turns use the tokens the model actually had in its context.
 """
 
-import itertools
 import json
 import random
 from dataclasses import asdict, dataclass
@@ -124,23 +125,31 @@ def build_example(record: dict, turn: int, renderer: Qwen35AgentRenderer, n_turn
     if teacher_prompt[: len(body)] != body or teacher_prompt[-len(suffix):] != suffix:
         raise HintChangesContext(f"{record['instance_id']} turn {turn}: teacher prompt doesn't extend the student's")
 
-    # The target: the last supervised turn's prompt past the student prompt, + that turn's sampled
-    # tokens. Each turn's prompt must extend the previous one.
-    prompts = [student_prompt] + [rendered_prompt(record, messages, assistant_idx, t, renderer)
-                                  for t in range(turn + 1, last + 1)]
-    for t, (prev, prompt) in enumerate(itertools.pairwise(prompts), start=turn + 1):
-        if prompt[: len(prev)] != prev:
-            raise SkipExample(f"{record['instance_id']} turn {t}: prompt doesn't extend turn {t - 1}'s")
+    # The target: the last supervised turn's prompt past the student prompt, + that turn's sampled tokens.
+    # Each turn's prompt must end with the generation suffix at its stored length. Where it doesn't, the
+    # later history re-renders that turn (a turn without thinking gets an empty think block once it's
+    # history), so supervision stops at it: its own prompt is still exactly what the model saw.
+    while True:
+        last_prompt = rendered_prompt(record, messages, assistant_idx, last, renderer) if last > turn else student_prompt
+        starts = [record["turns"][t - 1]["prompt_len"] for t in range(turn, last + 1)]
+        ok = [last_prompt[n - len(suffix): n] == suffix for n in starts]
+        if all(ok):
+            break
+        if ok.index(False) == len(ok) - 1:
+            raise SkipExample(f"{record['instance_id']} turn {last}: prompt doesn't end with the generation suffix")
+        last = turn + ok.index(False)
+    if last_prompt[: len(student_prompt)] != student_prompt:
+        raise SkipExample(f"{record['instance_id']} turn {last}: prompt doesn't extend turn {turn}'s")
     last_tokens = record["turns"][last - 1]["tokens"]
-    target = prompts[-1][len(student_prompt):] + last_tokens
+    target = last_prompt[len(student_prompt):] + last_tokens
 
-    # What each prompt adds is the previous assistant turn, through its end token, then the tool output.
-    mask = []
-    for prev, prompt in itertools.pairwise(prompts):
-        added = prompt[len(prev):]
-        n = added.index(im_end) + 1 if im_end in added else len(added)
-        mask += [1] * n + [0] * (len(added) - n)
-    mask += [1] * len(last_tokens)
+    # Each supervised turn runs from where its prompt ended through its end token; what's between (tool
+    # outputs, formatting) is masked out.
+    mask = [0] * len(target)
+    for n in starts:
+        i = n - len(student_prompt)
+        end = target.index(im_end, i) + 1 if im_end in target[i:] else len(target)
+        mask[i:end] = [1] * (end - i)
 
     # The teacher's own rendering of the later turns must match too: the hint changes nothing after it.
     teacher_last = renderer.build_generation_prompt(

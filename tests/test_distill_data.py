@@ -97,6 +97,14 @@ def test_supervised_turns_stop_at_the_end_of_the_trajectory(renderer):
     assert rest.n_supervised == 4 and rest.target[-len(record["turns"][5]["tokens"]):] == record["turns"][5]["tokens"]
 
 
+def test_supervision_stops_where_rerendering_changes_history(renderer):
+    # Turn 4 has no thinking: from turn 5 on, its rendering gains an empty think block the model never
+    # wrote, so turn 5's context no longer extends turn 4's. Supervision stops at turn 4.
+    record = make_record(renderer, 6, no_thinking_turns=(4,))
+    ex = build_example(record, 2, renderer)
+    assert ex.n_supervised == 3 and ex.target[-len(record["turns"][3]["tokens"]):] == record["turns"][3]["tokens"]
+
+
 def test_hint_turn_is_seeded_per_task_and_capped_by_length(renderer):
     record = make_record(renderer, 5)
     turns = {pick_hint_turn(record, seed, 2, 9) for seed in range(50)}
