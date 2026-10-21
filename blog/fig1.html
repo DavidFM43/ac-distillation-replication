@@ -614,7 +614,7 @@ async function play() {
   await sleep(150);
   u.issue.classList.add("show");  // pasted, not typed
   await sleep(1100);
-  for (let t = 1; t <= 2; t++) { await turn(t, true); await sleep(350); }
+  for (let t = 1; t <= 2; t++) { await turn(t, true); await sleep(t === 1 ? 850 : 350); }
   for (let t = 3; t <= turns.length; t++) { await turn(t, false); await sleep(gap(t)); }
   await sleep(1100);
   stage.classList.add("frozen");
