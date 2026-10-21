@@ -107,7 +107,8 @@ function figure(svg) {
   const ROW_Y = 118, CELL_H = 24, TOK_X = 250;  // the target tokens
   const LOSS_Y = 298, LOSS_H = 34;  // the per-token loss strip: bars stand on this line
   const VIEW_RIGHT = 540;  // the focused token stays left of this as the row scrolls
-  const ACC_X0 = 60, ACC_X1 = 240, N_STREAM = 200, CENTER_Y = 190;  // where the losses pile up during the speed-up, and how many tokens go by
+  const ACC_X0 = 60, ACC_X1 = 240, N_STREAM = 200, CENTER_Y = 190;
+  const STREAM_S = 3, SCORE_X = 520;  // the speed-up's length, and where its tokens get scored  // where the losses pile up during the speed-up, and how many tokens go by
   const TOKENS_PER_TURN = 26;
   const POOL = ["Let", " me", " check", " the", " docs", ".", "bash", "(", "grep", " -r", " floatformat", ")", "Now", " run", " tests", "All", " pass"];
   const CHART = { slots: 9, gap: .55, sigma: .9 };  // candidates per distribution, gap between bars, KDE width (in slots)
@@ -149,7 +150,7 @@ function figure(svg) {
 
     // Target tokens and their loss bars, on a track that scrolls; clipped so it never runs into the labels
     const clip = s("clipPath", { id: "trackClip" }, null, s("defs"));
-    s("rect", { x: ACC_X1 + 8, y: 0, width: 600, height: 320 }, null, clip);
+    s("rect", { x: ACC_X1 + 8, y: 0, width: 600 - ACC_X1 - 8, height: 320 }, null, clip);  // never past the right edge
     const window_ = s("g", { "clip-path": "url(#trackClip)" });
     el.track = s("g", {}, null, window_);
     el.nextX = TOK_X;
@@ -265,8 +266,8 @@ function figure(svg) {
   }
 
   // Compare: the token shows its score, and its loss goes into the strip below
-  function score(i, k, { number = true } = {}) {
-    const cell = el.cells[i];
+  function score(i, k, opts) { scoreCell(el.cells[i], k, opts); }
+  function scoreCell(cell, k, { number = true } = {}) {
     cell.r.style.fill = klColor(k);
     const h = 1.5 + Math.min(k / 1.5, 1) * LOSS_H;
     const bar = s("rect", { class: "grow", x: cell.c - 4, y: LOSS_Y - h, width: 8, height: h, rx: 1.5, fill: css("loss"), style: "transform: scaleY(0)" }, null, el.track);
@@ -286,6 +287,47 @@ function figure(svg) {
     cell.absorbed = true;
     const x = ACC_X0 + el.nAcc++ * (ACC_X1 - ACC_X0) / N_STREAM, h = 1.5 + Math.min(cell.k / 1.5, 1) * LOSS_H;
     s("line", { x1: x, x2: x, y1: LOSS_Y, y2: LOSS_Y - h, stroke: css("loss"), "stroke-width": .8 }, null, el.acc);
+  }
+
+  // The rest of the target tokens glide past, accelerating, for about STREAM_S seconds. Each is scored as it
+  // crosses the scoring line, and its loss joins the pile on the left as it leaves the frame.
+  function stream() {
+    const queue = Array.from({ length: N_STREAM - TOKENS.length }, (_, n) =>
+      n < MORE.length ? MORE[n] : [POOL[n % POOL.length], spikeKL(Math.floor(n / TOKENS_PER_TURN), n % TOKENS_PER_TURN, n)]);
+    el.cells.forEach(c => { c.scored = true; c.r.style.fill = css("fixed"); c.r.style.stroke = css("turn"); c.g.style.opacity = .45; });
+    el.track.style.transition = "none";
+    // how far the row has to travel for the last token to leave on the left; accelerate to cover it in time
+    const width = queue.reduce((t, [tok]) => t + Math.max(tok.trim().length * 8 + 16, 30) + 8, 0);
+    const start = el.offset, distance = el.nextX + width + start - (ACC_X1 + 8);
+    const v0 = 150, acc = 2 * (distance - v0 * STREAM_S) / STREAM_S ** 2;
+    return new Promise(done => {
+      const t0 = performance.now();
+      const step = now => {
+        const t = Math.min((now - t0) / 1000, STREAM_S);
+        el.offset = start - (v0 * t + acc * t * t / 2);
+        el.track.style.transform = `translate(${el.offset}px, 0px)`;
+        while (queue.length && el.nextX + el.offset < 620) {  // new tokens come in from the right
+          const [tok, k] = queue.shift(), cell = addCell(tok, k);
+          cell.g.style.opacity = .45;
+        }
+        for (const cell of el.cells) {
+          if (!cell.scored && cell.c + el.offset < SCORE_X) {  // scored as it passes, a brief flash
+            cell.scored = true;
+            cell.g.style.opacity = 1;
+            scoreCell(cell, cell.k, { number: false });
+            setTimeout(() => { cell.r.style.fill = css("fixed"); cell.g.style.opacity = .45; }, 70);
+          }
+          if (cell.x + cell.w + el.offset < ACC_X1 + 8) absorb(cell);
+        }
+        while (el.cells.length && el.cells[0].absorbed) {  // gone off the left
+          const gone = el.cells.shift();
+          gone.g.remove(); gone.bar?.remove();
+        }
+        if (!queue.length && !el.cells.length) return done();
+        requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
   }
 
   // ---- The loop ----
@@ -381,21 +423,8 @@ function figure(svg) {
     show(el.more, false);
     svg.classList.add("fast");
     show(el.acc);
-    el.cells.forEach(absorb);
-    for (let n = 0; n < N_STREAM - TOKENS.length; n++) {
-      const [t, k] = n < MORE.length ? MORE[n] : [POOL[n % POOL.length], spikeKL(Math.floor(n / TOKENS_PER_TURN), n % TOKENS_PER_TURN, n)];
-      const cell = addCell(t, k);
-      show(cell.g);
-      focusOn(el.cells.length - 1);
-      score(el.cells.length - 1, k, { number: false });
-      absorb(cell);
-      const x = n / (N_STREAM - TOKENS.length);
-      if (el.cells.length > 40) el.cells.shift().g.remove();  // tokens long gone off the left
-      await sleep(4 + 32 * (1 - x) ** 2);  // accelerating: about 3 seconds for the whole stream
-    }
+    await stream();
     svg.classList.remove("fast");
-    focusOn(null);
-    await sleep(300);
 
     // Pull back: the losses of every target token move to the center and spread across the frame
     [el.track, el.lblLoss, el.lossLine].forEach(e => show(e, false));
