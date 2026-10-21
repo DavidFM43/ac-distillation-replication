@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Distribution options</title>
+<style>
+:root {
+  --bg: #fcfcfb; --ink: #1a1a19; --muted: #6b6a66; --line: #e6e5e1; --turn: #d6d5d0; --fixed: #ecebe7;
+  --student: #3d7fd6; --teacher: #e09a2f;
+  --sans: ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bg: #1b1b1a; --ink: #ecebe8; --muted: #a09f9a; --line: #34342f; --turn: #4a4a46; --fixed: #2a2a28; }
+}
+:root[data-theme="dark"] { --bg: #1b1b1a; --ink: #ecebe8; --muted: #a09f9a; --line: #34342f; --turn: #4a4a46; --fixed: #2a2a28; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); }
+main { max-width: 720px; margin: 32px auto; padding: 0 16px; }
+h1 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+.note { font-size: 13px; color: var(--muted); margin: 0 0 24px; }
+.opt { border-top: 1px solid var(--line); padding: 14px 0 22px; }
+.cap { font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+.cap b { color: var(--ink); margin-right: 6px; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+svg { width: 100%; height: auto; display: block; overflow: visible; }
+svg text { font-family: var(--mono); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Ways to show the two distributions</h1>
+  <p class="note">Each option at two tokens: “Let”, where teacher and student agree, and “also”, where the hint changes things. Bold is the token in the rollout.</p>
+  <div id="opts"></div>
+</main>
+<script>
+const NEXT = {
+  Let: [["Let", .80, .62], ["I", .13, .18], ["All", .04, .15]],
+  also: [[" also", .48, .07], [" run", .30, .09], [" submit", .02, .42], [" wrap", .03, .36]],
+};
+const NS = "http://www.w3.org/2000/svg";
+const css = v => `var(--${v})`;
+function s(tag, attrs = {}, text, parent) {
+  const e = document.createElementNS(NS, tag);
+  if (tag === "text") attrs = { fill: css("muted"), "font-size": 10, ...attrs };
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (text != null) e.textContent = text;
+  parent.append(e);
+  return e;
+}
+
+// The main candidates, largest first, then a long tail; [text, p student, p teacher, is target]
+function distribution(name, slots = 12) {
+  const main = NEXT[name], target = main[0];
+  const cands = [...main].sort((a, b) => Math.max(b[1], b[2]) - Math.max(a[1], a[2]));
+  const rest = j => Math.max(1 - cands.reduce((t, c) => t + c[j], 0), 0);
+  const n = slots - cands.length, w = Array.from({ length: n }, (_, k) => 0.6 ** k), W = w.reduce((a, b) => a + b, 0);
+  return cands.map(c => [c[0].trim(), c[1], c[2], c === target])
+    .concat(w.map((v, k) => ["", rest(1) * v / W, rest(2) * v / W * (1 + 0.3 * Math.sin(k * 2.1)), false]));
+}
+
+function option(letter, caption, draw, h = 130) {
+  const div = document.createElement("div");
+  div.className = "opt";
+  div.innerHTML = `<div class="cap"><b>${letter}</b>${caption}</div><div class="pair"></div>`;
+  for (const name of ["Let", "also"]) {
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", `0 0 320 ${h}`);
+    draw(svg, distribution(name), name);
+    div.querySelector(".pair").append(svg);
+  }
+  document.getElementById("opts").append(div);
+}
+const label = (svg, x, y, d, extra = {}) => {
+  if (!d[0]) return;
+  // angled, so neighbouring labels don't run into each other
+  s("text", { x: x + 3, y: y - 4, "text-anchor": "end", transform: `rotate(-40 ${x + 3} ${y - 4})`,
+    ...(d[3] ? { fill: css("ink"), "font-weight": 700 } : {}), ...extra }, d[0], svg);
+};
+
+option("A", "Paired bars (in the animation now): student and teacher side by side for each candidate.", (svg, d) => {
+  const base = 100, H = 85, slot = 22, bw = 9;
+  d.forEach((c, k) => {
+    const x = 20 + k * slot;
+    s("rect", { x, y: base - Math.max(.8, c[1] * H), width: bw, height: Math.max(.8, c[1] * H), rx: 1, fill: css("student") }, null, svg);
+    s("rect", { x: x + bw + 1, y: base - Math.max(.8, c[2] * H), width: bw, height: Math.max(.8, c[2] * H), rx: 1, fill: css("teacher") }, null, svg);
+    label(svg, x + bw, base + 12, c);
+  });
+  s("line", { x1: 16, x2: 20 + d.length * slot, y1: base, y2: base, stroke: css("turn") }, null, svg);
+});
+
+option("B", "Mirrored: the teacher's distribution above the line, the student's below, same candidates in the same order.", (svg, d) => {
+  const mid = 75, H = 60, slot = 22, bw = 14;
+  d.forEach((c, k) => {
+    const x = 20 + k * slot;
+    s("rect", { x, y: mid - 1 - Math.max(.8, c[2] * H), width: bw, height: Math.max(.8, c[2] * H), rx: 1, fill: css("teacher") }, null, svg);
+    s("rect", { x, y: mid + 1, width: bw, height: Math.max(.8, c[1] * H), rx: 1, fill: css("student") }, null, svg);
+  });
+  s("line", { x1: 16, x2: 20 + d.length * slot, y1: mid, y2: mid, stroke: css("turn") }, null, svg);
+  // labels under everything, so they don't sit on the bars
+  d.forEach((c, k) => label(svg, 20 + k * slot + bw / 2, mid + H + 14, c));
+}, 160);
+
+option("C", "Stacked strips: each distribution as one bar that adds up to 100%, cut into its candidates. The tail is the faint end.", (svg, d) => {
+  const W = 290, x0 = 20, hgt = 22;
+  for (const [y, j, who] of [[22, 2, "teacher"], [72, 1, "student"]]) {
+    let x = x0;
+    d.forEach((c, k) => {
+      const w = c[j] * W;
+      const shade = c[0] ? 1 - k * 0.18 : 0.15;
+      s("rect", { x, y, width: Math.max(w - 1, 0), height: hgt, fill: css(who), opacity: Math.max(shade, .15) }, null, svg);
+      if (c[0] && w > 26) s("text", { x: x + w / 2, y: y + 15, "text-anchor": "middle", fill: "#fff", ...(c[3] ? { "font-weight": 700 } : {}) }, c[0], svg);
+      x += w;
+    });
+    s("text", { x: x0, y: y - 6, fill: css(who) }, who, svg);
+  }
+});
+
+option("D", "Overlaid outlines: the teacher's distribution as a filled shape, the student's as a line over it. Where they differ is where the shapes don't match.", (svg, d) => {
+  const base = 100, H = 85, slot = 22;
+  const path = j => d.map((c, k) => `${k ? "L" : "M"}${20 + k * slot},${base - c[j] * H} L${20 + (k + 1) * slot},${base - c[j] * H}`).join(" ");
+  s("path", { d: `${path(2)} L${20 + d.length * slot},${base} L20,${base} Z`, fill: css("teacher"), opacity: .35 }, null, svg);
+  s("path", { d: path(2), fill: "none", stroke: css("teacher"), "stroke-width": 1.5 }, null, svg);
+  s("path", { d: path(1), fill: "none", stroke: css("student"), "stroke-width": 2 }, null, svg);
+  s("line", { x1: 16, x2: 20 + d.length * slot, y1: base, y2: base, stroke: css("turn") }, null, svg);
+  d.forEach((c, k) => label(svg, 20 + k * slot + slot / 2, base + 12, c));
+});
+</script>
+</body>
+</html>
