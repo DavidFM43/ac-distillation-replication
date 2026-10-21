@@ -53,6 +53,7 @@ figure { margin: 40px auto; max-width: 760px; padding: 0 16px; }
   transition: transform .28s ease, box-shadow .28s ease, filter .28s ease, background-color 1s ease, border-color 1s ease, color 1s ease, opacity .25s ease;
 }
 .card * { transition: color 1s ease; }
+.slow .card { transition-duration: .7s; }
 .card.front { box-shadow: 0 -1px 0 rgb(0 0 0 / .55), 0 8px 22px -12px rgb(0 0 0 / .5); }
 /* Once the rollout ends, it's stored data: the cards go gray */
 .card.frozen {
@@ -627,6 +628,8 @@ const ASK = "Fix this issue in the django repo:";
 const titleLine = TRAJ.problem.split("\n")[0];
 const codeLines = ["floatformat('0.00', 0)", "ValueError: valid range for prec is [1, MAX_PREC]"];
 const turns = TRAJ.turns;
+// The turn after the hint is the one step 3 scores, so the deck holds the same text
+turns[HINT_TURN - 1] = [THOUGHT.map(t => t[0]).join(""), "bash", CALL.slice(2, -1).map(t => t[0]).join(""), "Ran 93 tests in 1.2s"];
 let deck = [];  // the user card, then one card per turn; the last one is in front
 
 async function typeInto(node, text, cps) {
@@ -647,7 +650,8 @@ function layout(skipFront = false) {
     const depth = deck.length - 1 - i;
     const [dx, rot] = depth ? jitter(Number(card.dataset.seed)) : [0, 0];
     card.style.zIndex = i;
-    card.style.transform = `translateY(${-depth * step}px) translateX(${dx}px) rotate(${rot}deg) scaleX(${1 - depth * SHRINK})`;
+    const lift = Number(card.dataset.lift || 0);
+    card.style.transform = `translateY(${-depth * step - lift}px) translateX(${dx}px) rotate(${rot}deg) scaleX(${1 - depth * SHRINK})`;
     card.style.filter = `brightness(${1 - Math.min(depth * DIM, 0.35)})`;
     card.classList.toggle("front", depth === 0);
   });
@@ -660,15 +664,6 @@ function deal(card, seed) {  // slides the card in from below, onto the front of
   deck.push(card);
   layout(true);
   requestAnimationFrame(() => requestAnimationFrame(() => layout()));
-}
-
-async function takeFront() {  // the front card drops away
-  const card = deck.pop();
-  card.style.transform = "translateY(40px)";
-  card.style.opacity = 0;
-  layout();
-  await sleep(30);
-  setTimeout(() => card.remove(), 300);
 }
 
 function userCard() {
@@ -704,16 +699,6 @@ function turnCard(t) {
 function fill(c) {
   c.th.textContent = c.thought; c.code.textContent = c.cmd;
   c.oText.textContent = c.out; c.o.style.visibility = c.out ? "" : "hidden";
-}
-
-// The turn the hint goes before, as step 3 scores it (the stored text stands in for THOUGHT and CALL)
-function storedTurnCard() {
-  const c = turnCard(HINT_TURN);
-  c.thought = THOUGHT.map(t => t[0]).join("");
-  c.cmd = CALL.slice(2, -1).map(t => t[0]).join("");
-  c.out = "";
-  fill(c);
-  return c;
 }
 
 async function turn(t, typed) {
@@ -830,6 +815,7 @@ async function score(spans, i, hold) {
 // ---- The loop ----
 
 function reset() {
+  stage.style.removeProperty("--step");
   $("deckLayer").replaceChildren();
   $("deckLayer").classList.remove("hidden");
   $("learn").classList.add("hidden");
@@ -855,18 +841,30 @@ async function play() {
   deck.forEach(c => c.classList.add("frozen"));
   await sleep(1600);
 
-  // 2. The hint: back to turn 38, a hint goes in before it, and the stored turn 38 goes back on top
-  while (deck.length > HINT_TURN) await takeFront();
-  await sleep(500);
+  // 2. The hint: written above the stored deck, then slid into it right before turn 38
+  $("deckLayer").classList.add("slow");
+  stage.style.setProperty("--step", `${parseFloat(getComputedStyle(stage).getPropertyValue("--step")) * 0.55}px`);
+  layout();  // the deck squares up, leaving room above it
+  await sleep(800);
   const h = hintCard();
-  deal(h.card, 1000);
+  h.card.dataset.seed = 1000;
+  h.card.style.zIndex = 1000;
+  h.card.style.opacity = 0;
+  $("deckLayer").append(h.card);
+  h.card.style.transform = `translateY(${h.card.offsetHeight - stage.clientHeight}px)`;  // at the top of the frame
+  requestAnimationFrame(() => requestAnimationFrame(() => { h.card.style.opacity = ""; }));
   await sleep(300);
   await typeInto(h.text, HINT, 110);
-  await sleep(900);
-  const stored = storedTurnCard();
-  stored.card.classList.add("frozen");
-  deal(stored.card, HINT_TURN);
-  await sleep(1300);
+  await sleep(700);
+  const GAP = 40;
+  deck.slice(0, HINT_TURN).forEach(c => { c.dataset.lift = GAP; });
+  layout();  // the deck opens between turns 37 and 38
+  await sleep(800);
+  h.card.dataset.lift = GAP;
+  deck.splice(HINT_TURN, 0, h.card);
+  layout();  // the hint slides into the gap, behind turn 38 and the rest
+  await sleep(1900);
+  $("deckLayer").classList.remove("slow");
 
   // 3. Learning: score each stored token in both contexts and compare
   miniDeck($("miniA"), false);
