@@ -142,7 +142,7 @@ function named(name, tailSlots = 6) {
 }
 
 // Bars plus options: a KDE-like smooth shape behind them, a narrower tail, a "…" break before tₙ
-function fancy(svg, d, { kde = false, tailWidth = 1, dots = true, H2 = H } = {}) {
+function fancy(svg, d, { kde = false, tailWidth = 1, dots = true, H2 = H, barFrac = .88, kdeAlpha = .18 } = {}) {
   const unit = WIDTH / d.reduce((t, c) => t + (c[4] ? tailWidth : 1), 0) * (dots ? 0.94 : 1);
   const xs = []; let x = X0;
   d.forEach((c, k) => {
@@ -160,14 +160,14 @@ function fancy(svg, d, { kde = false, tailWidth = 1, dots = true, H2 = H } = {})
       let path = `M${X0},${MID} L${p[0][0] - xs[0][1] / 2},${p[0][1]} L${p[0][0]},${p[0][1]}`;
       for (let k = 1; k < p.length; k++) { const mx = (p[k - 1][0] + p[k][0]) / 2; path += ` C${mx},${p[k - 1][1]} ${mx},${p[k][1]} ${p[k][0]},${p[k][1]}`; }
       path += ` L${x},${MID} Z`;
-      s("path", { d: path, fill: css(who), opacity: .18 }, null, svg);
+      s("path", { d: path, fill: css(who), opacity: kdeAlpha }, null, svg);
       s("path", { d: path.replace(/ L[\d.]+,[\d.]+ Z$/, ""), fill: "none", stroke: css(who), "stroke-width": 1, opacity: .5 }, null, svg);
     }
   }
   d.forEach((c, k) => {
-    const [bx, w] = xs[k], bw = w * .88;
-    s("rect", { x: bx, y: MID - 1 - c[2] * H2, width: bw, height: c[2] * H2, fill: css("teacher") }, null, svg);
-    s("rect", { x: bx, y: MID + 1, width: bw, height: c[1] * H2, fill: css("student") }, null, svg);
+    const [bx, w] = xs[k], bw = w * barFrac, cx = bx + (w - bw) / 2;
+    s("rect", { x: cx, y: MID - 1 - c[2] * H2, width: bw, height: c[2] * H2, fill: css("teacher") }, null, svg);
+    s("rect", { x: cx, y: MID + 1, width: bw, height: c[1] * H2, fill: css("student") }, null, svg);
   });
   s("line", { x1: X0 - 4, x2: x, y1: MID, y2: MID, stroke: css("turn") }, null, svg);
   d.forEach((c, k) => {
@@ -181,6 +181,8 @@ option("B6a", "B6 with a KDE behind the bars.", (svg, name) => fancy(svg, named(
 option("B6b", "More named tokens, then a short tail t₉, t₁₀, … tₙ.", (svg, name) => fancy(svg, named(name, 6)));
 option("B6c", "B6b with the KDE behind.", (svg, name) => fancy(svg, named(name, 6), { kde: true }));
 option("B6d", "B6c with a narrower tail, so the named tokens get the room.", (svg, name) => fancy(svg, named(name, 6), { kde: true, tailWidth: .5 }));
+option("B6e", "B6d with thin bars, so the KDE silhouette carries the shape.", (svg, name) => fancy(svg, named(name, 6), { kde: true, tailWidth: .5, barFrac: .4, kdeAlpha: .28 }));
+option("B6f", "Thinner still: the bars become ticks inside the silhouette.", (svg, name) => fancy(svg, named(name, 6), { kde: true, tailWidth: .5, barFrac: .2, kdeAlpha: .35 }));
 </script>
 </body>
 </html>
