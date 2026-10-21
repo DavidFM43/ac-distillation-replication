@@ -7,67 +7,57 @@
 <style>
 :root {
   --bg: #fcfcfb;
-  --surface: #ffffff;
-  --ink: #1a1a19;
-  --muted: #6b6a66;
-  --faint: #a3a29d;
-  --line: #dddcd7;
-  --accent: #2a78d6;
-  --accent-soft: #e8f0fb;
-  --warn: #b5651d;
+  /* The cards are terminal panes, dark in both page themes */
+  --term: #161615;
+  --term-edge: #3a3a36;
+  --term-ink: #e8e6e1;
+  --term-dim: #8e8d87;
+  --term-faint: #63625d;
+  --ok: #6cc287;
+  --warn: #e0a458;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  --sans: ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #161615; --surface: #1f1f1e; --ink: #ecebe8; --muted: #a09f9a; --faint: #6b6a66;
-    --line: #34342f; --accent: #5b9be6; --accent-soft: #1d2a3b; --warn: #d9904a;
-  }
+  :root:not([data-theme="light"]) { --bg: #1f1f1e; --term: #121211; --term-edge: #3f3f3b; }
 }
-:root[data-theme="dark"] {
-  --bg: #161615; --surface: #1f1f1e; --ink: #ecebe8; --muted: #a09f9a; --faint: #6b6a66;
-  --line: #34342f; --accent: #5b9be6; --accent-soft: #1d2a3b; --warn: #d9904a;
-}
+:root[data-theme="dark"] { --bg: #1f1f1e; --term: #121211; --term-edge: #3f3f3b; }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); }
+body { margin: 0; background: var(--bg); font-family: var(--mono); }
 figure { margin: 40px auto; max-width: 760px; padding: 0 16px; }
 
 /* Every card has the same height, so the cards behind the front one show as evenly spaced edges */
 .stage { --h: 112px; --step: 2.5px; height: 340px; max-width: 600px; margin: 0 auto; position: relative; transition: opacity .6s ease, filter 1s ease; }
-.stage.frozen { filter: grayscale(1); opacity: .55; }
+.stage.frozen { filter: grayscale(1); opacity: .5; }
 .stage.fading { opacity: 0; }
 .card {
   position: absolute; left: 0; right: 0; bottom: 0; height: var(--h);
-  background: var(--surface); border: 1px solid var(--line); border-radius: 7px;
-  padding: 9px 12px; font-size: 13px; line-height: 1.45; overflow: hidden;
+  background: var(--term); border: 1px solid var(--term-edge); border-radius: 7px;
+  padding: 10px 14px; font: 12px/1.55 var(--mono); color: var(--term-ink); overflow: hidden;
   transition: transform .28s ease, box-shadow .28s ease;
 }
-.card.front { box-shadow: 0 6px 18px -10px rgb(0 0 0 / .25); }
-.card.user { border-top: 2px solid var(--ink); }
-.head { font: 11px var(--mono); color: var(--faint); margin-bottom: 2px; }
-.ask { min-height: 1.45em; }
-.issue { margin-top: 4px; padding-left: 9px; border-left: 2px solid var(--line); opacity: 0; transition: opacity .35s ease; }
+.card.front { box-shadow: 0 8px 22px -12px rgb(0 0 0 / .5); }
+.head { position: absolute; top: 9px; right: 12px; font-size: 10.5px; color: var(--term-faint); }
+.line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.55em; padding-right: 56px; }
+.mark { display: inline-block; width: 2ch; }
+.ask .mark { color: var(--term-dim); }
+.issue { padding-left: 2ch; color: var(--term-dim); opacity: 0; transition: opacity .35s ease; }
 .issue.show { opacity: 1; }
-.title { font-weight: 600; font-size: 12.5px; }
-.user pre { margin: 0; font: 11.5px/1.5 var(--mono); color: var(--muted); white-space: pre-wrap; }
+.issue .title { color: var(--term-ink); }
+.issue div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .thought {
-  color: var(--muted); min-height: 1.45em;
+  color: var(--term-dim); font-style: italic; min-height: 1.55em; padding-right: 56px;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-.call { font: 12px/1.5 var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.5em; }
-.tool {
-  display: inline-block; font: 10.5px/1.6 var(--mono); padding: 0 5px; margin-right: 6px;
-  border-radius: 3px; background: var(--accent-soft); color: var(--accent);
-}
-.tool.submit { background: var(--accent); color: var(--surface); }
-.tool.bad { background: transparent; color: var(--warn); padding: 0; }
-.out { font: 11.5px/1.5 var(--mono); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.out:not(:empty)::before { content: "→ "; }
+.thought .mark { font-style: normal; }
+.call .mark { color: var(--ok); }
+.call.bad .mark, .call.bad .name { color: var(--warn); }
+.name { font-weight: 600; }
+.out { color: var(--term-dim); padding-left: 2ch; }
+.out .mark { color: var(--term-faint); }
 
 @media (max-width: 520px) {
-  .stage { --h: 124px; --step: 2px; height: 300px; }
-  .card { font-size: 12px; }
-  .call { font-size: 11px; }
+  .stage { --h: 128px; --step: 2px; height: 310px; }
+  .card { font-size: 11px; padding: 9px 11px; }
 }
 </style>
 </head>
@@ -561,33 +551,39 @@ function deal(card) {  // slides the card in from below, onto the front of the d
 }
 
 function userCard() {
-  const card = el("div", "card user"), ask = el("div", "ask"), issue = el("div", "issue");
-  issue.append(el("div", "title", titleLine), el("pre", "", codeLines.join("\n")));
-  card.append(el("div", "head", "user"), ask, issue);
-  return { card, ask, issue };
+  const card = el("div", "card user"), ask = el("div", "line ask"), text = el("span"), issue = el("div", "issue");
+  ask.append(el("span", "mark", ">"), text);
+  issue.append(el("div", "title", titleLine), ...codeLines.map(l => el("div", "", l)));
+  card.append(ask, issue);
+  return { card, ask: text, issue };
 }
 
+// One turn as a terminal agent prints it: its thinking, its tool call, and the call's output
 function turnCard(t) {
   const [thought, tool, cmd, out] = turns[t - 1];
-  const card = el("div", "card"), th = el("div", "thought"), call = el("div", "call"), o = el("div", "out");
-  const chip = tool === "none" ? el("span", "tool bad", "⚠ no valid tool call")
-             : el("span", "tool" + (tool === "task_complete" ? " submit" : ""), tool);
-  const code = el("span");
-  call.append(chip, code);
+  const card = el("div", "card"), th = el("div", "thought"), thText = el("span");
+  th.append(el("span", "mark", "✻"), thText);
+  const call = el("div", "line call" + (tool === "none" ? " bad" : "")), code = el("span");
+  if (tool === "none") call.append(el("span", "mark", "⏺"), el("span", "name", "no valid tool call"));
+  else call.append(el("span", "mark", "⏺"), el("span", "name", tool), "(", code, ")");
+  const o = el("div", "line out"), oText = el("span");
+  o.append(el("span", "mark", "⎿"), oText);
+  o.style.visibility = "hidden";
   card.append(el("div", "head", `turn ${t}`), th, call, o);
-  return { card, th, code, o, thought, cmd, out };
+  return { card, th: thText, code, o, oText, thought, cmd, out };
 }
 
 async function turn(t, typed) {
   const c = turnCard(t);
-  if (!typed) { c.th.textContent = c.thought; c.code.textContent = c.cmd; c.o.textContent = c.out; }
+  const showOut = () => { c.oText.textContent = c.out; c.o.style.visibility = c.out ? "" : "hidden"; };
+  if (!typed) { c.th.textContent = c.thought; c.code.textContent = c.cmd; showOut(); }
   deal(c.card);
   if (typed) {
     await sleep(200);
     await typeInto(c.th, c.thought, 260);
     await typeInto(c.code, c.cmd, 320);
     await sleep(120);
-    c.o.textContent = c.out;
+    showOut();
   }
 }
 
@@ -628,7 +624,8 @@ function still() {  // reduced motion: the finished deck, no animation
   const u = userCard(); u.ask.textContent = ASK; u.issue.classList.add("show");
   stage.append(u.card); deck.push(u.card);
   for (let t = 1; t <= turns.length; t++) {
-    const c = turnCard(t); c.th.textContent = c.thought; c.code.textContent = c.cmd; c.o.textContent = c.out;
+    const c = turnCard(t); c.th.textContent = c.thought; c.code.textContent = c.cmd;
+    c.oText.textContent = c.out; c.o.style.visibility = c.out ? "" : "hidden";
     stage.append(c.card); deck.push(c.card);
   }
   layout();
