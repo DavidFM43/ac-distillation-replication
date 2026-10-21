@@ -7,46 +7,63 @@
 <style>
 :root {
   --bg: #fcfcfb;
-  --label: #6b6a66;
+  --ink: #1a1a19;
+  --muted: #6b6a66;
+  --faint: #a3a29d;
+  --line: #e6e5e1;
   /* The cards are terminal panes, dark in both page themes */
   --term: #161615;
   --term-edge: #3a3a36;
+  --term-top: #6a6964;  /* the top edge, what shows of each card behind the front one */
   --term-ink: #e8e6e1;
   --term-dim: #8e8d87;
   --term-faint: #63625d;
   --ok: #6cc287;
   --warn: #e0a458;
-  --hint: #b48cf0;        /* the hint, and how much it changes each token */
-  --hint-rgb: 180 140 240;
-  --hint-bar: #8a5cd6;    /* bars on the page background */
-  --plain-bar: #a3a29d;
+  /* The two contexts the same model reads */
+  --nohint: #5b9be6;
+  --hint: #e8a33d;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --bg: #1f1f1e; --label: #a09f9a; --term: #121211; --term-edge: #3f3f3b; --hint-bar: #b48cf0; --plain-bar: #6b6a66; }
+  :root:not([data-theme="light"]) {
+    --bg: #1f1f1e; --ink: #ecebe8; --muted: #a09f9a; --faint: #6b6a66; --line: #34342f;
+    --term: #121211; --term-edge: #3f3f3b;
+  }
 }
-:root[data-theme="dark"] { --bg: #1f1f1e; --label: #a09f9a; --term: #121211; --term-edge: #3f3f3b; --hint-bar: #b48cf0; --plain-bar: #6b6a66; }
+:root[data-theme="dark"] {
+  --bg: #1f1f1e; --ink: #ecebe8; --muted: #a09f9a; --faint: #6b6a66; --line: #34342f;
+  --term: #121211; --term-edge: #3f3f3b;
+}
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); font-family: var(--mono); }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--mono); }
 figure { margin: 40px auto; max-width: 760px; padding: 0 16px; }
 
-.stage { --h: 112px; --step: 2.5px; --below: 150px; height: 400px; max-width: 600px; margin: 0 auto; position: relative; transition: opacity .6s ease; }
-.stage.fading { opacity: 0; }
+.stage { --h: 108px; --step: 4px; height: 410px; max-width: 600px; margin: 0 auto; position: relative; }
+.layer { position: absolute; inset: 0; transition: opacity .5s ease; }
+.layer.hidden { opacity: 0; pointer-events: none; }
 
-/* A deck: every card has the same height, so the cards behind the front one show as evenly spaced edges */
-.deck { position: absolute; left: 0; right: 0; top: 0; bottom: 0; overflow: hidden; transition: left .8s ease, right .8s ease, bottom .8s ease; }
+/* Every card has the same height, so the cards behind the front one show as evenly spaced edges */
 .card {
   position: absolute; left: 0; right: 0; bottom: 0; height: var(--h);
-  background: var(--term); border: 1px solid var(--term-edge); border-radius: 7px;
+  background: var(--term); border: 1px solid var(--term-edge); border-top-color: var(--term-top); border-radius: 7px;
   padding: 10px 14px; font: 12px/1.55 var(--mono); color: var(--term-ink); overflow: hidden;
-  transition: transform .28s ease, box-shadow .28s ease, opacity .5s ease;
+  box-shadow: 0 -1px 0 rgb(0 0 0 / .55);  /* a dark line above each card sets its light top edge apart */
+  transform-origin: 50% 100%;
+  transition: transform .28s ease, box-shadow .28s ease, filter .28s ease, background-color 1s ease, border-color 1s ease, color 1s ease, opacity .25s ease;
 }
-.card.front { box-shadow: 0 8px 22px -12px rgb(0 0 0 / .5); }
-.card.leaving { transition: transform .7s ease-in, opacity .7s ease-in; opacity: 0; }
-/* A finished rollout is fixed data */
-.card.frozen { --term-ink: #77766f; --term-dim: #55544f; --term-faint: #45443f; --ok: #6b6a64; --warn: #6b6a64; }
+.card * { transition: color 1s ease; }
+.card.front { box-shadow: 0 -1px 0 rgb(0 0 0 / .55), 0 8px 22px -12px rgb(0 0 0 / .5); }
+/* Once the rollout ends, it's stored data: the cards go gray */
+.card.frozen {
+  --term: #6b6b67; --term-edge: #7d7d78; --term-top: #9a9994; --term-ink: #f1f1ee;
+  --term-dim: #d2d2ce; --term-faint: #b9b9b4; --ok: #e2e2de; --warn: #e2e2de;
+}
+.card.hint { border-top: 2px solid var(--hint); }
+.card.hint .mark { color: var(--hint); }
 .head { position: absolute; top: 9px; right: 12px; font-size: 10.5px; color: var(--term-faint); }
 .line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.55em; padding-right: 56px; }
+.wrap { min-height: 1.55em; padding-right: 56px; }
 .mark { display: inline-block; width: 2ch; }
 .ask .mark { color: var(--term-dim); }
 .issue { padding-left: 2ch; color: var(--term-dim); opacity: 0; transition: opacity .35s ease; }
@@ -64,56 +81,73 @@ figure { margin: 40px auto; max-width: 760px; padding: 0 16px; }
 .out { color: var(--term-dim); padding-left: 2ch; }
 .out .mark { color: var(--term-faint); }
 
-/* The hint: a user message, in its own color */
-.card.hint { border-color: var(--hint); }
-.card.hint .head, .card.hint .mark { color: var(--hint); }
-.hint-text { display: flex; padding-right: 40px; }
-.hint-text > span:last-child { flex: 1; min-width: 0; }
-.hint-text .mark { flex: none; }
-
-/* Turn 38 as the text being scored: each token is tinted by how much the hint changes it */
-.scored { display: flex; padding-right: 62px; }
-.scored .mark { flex: none; color: var(--term-dim); }
-.tokens { flex: 1; min-width: 0; font-style: italic; color: var(--term-faint); }
-.tok { white-space: pre-wrap; border-radius: 2px; transition: background-color .3s ease, color .3s ease; }
-.tok.done { color: var(--term-ink); }
-.tok.now { color: var(--term-ink); box-shadow: inset 0 -2px var(--hint); }
-
-/* Under each deck: the next-token distribution it gives */
-.below { position: absolute; bottom: 0; height: var(--below); opacity: 0; transition: opacity .6s ease; }
-.below.show { opacity: 1; }
-.below.left { left: 0; right: calc(50% + 10px); }
-.below.right { left: calc(50% + 10px); right: 0; }
-.deck-label { font-size: 11px; color: var(--label); margin: 8px 0 10px; }
-.deck-label b { font-weight: 600; color: var(--hint-bar); }
-.row { display: flex; align-items: center; gap: 8px; height: 20px; font-size: 11.5px; color: var(--label); }
-.row .t { width: 9ch; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
-.row.written .t { color: inherit; font-weight: 600; }
-.row .track { flex: 1; height: 8px; }
-.row .bar { height: 100%; width: 0; border-radius: 2px; transition: width .35s ease; }
-.left .bar { background: var(--hint-bar); }
-.right .bar { background: var(--plain-bar); }
-.row .p { width: 4ch; text-align: right; font-variant-numeric: tabular-nums; }
-.kl {
-  position: absolute; left: 0; right: 0; bottom: 0; text-align: center; font-size: 11.5px; color: var(--label);
-  opacity: 0; transition: opacity .6s ease;
+/* Step 3: the same model reads the same stored turn in two contexts */
+.learn { display: flex; flex-direction: column; justify-content: center; gap: 18px; }
+.contexts { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.ctx { display: flex; flex-direction: column; gap: 6px; }
+.mini { position: relative; height: 100px; }
+.mini .edge {
+  position: absolute; left: 0; right: 0; height: 40px; border-radius: 4px;
+  background: #6b6b67; border-top: 1px solid #9a9994; box-shadow: 0 -1px 0 rgb(0 0 0 / .4);
 }
-.kl.show { opacity: 1; }
-.kl .chip { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-left: 6px; }
+.mini .face {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 34px; border-radius: 5px; padding: 6px 9px;
+  background: #6b6b67; border-top: 1px solid #9a9994; color: #f1f1ee; font-size: 10.5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: 0 -1px 0 rgb(0 0 0 / .4);
+}
+.mini .face.hint { background: var(--term); border-top: 2px solid var(--hint); color: var(--term-ink); }
+.mini .face.hint b { color: var(--hint); font-weight: normal; }
+.who { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+
+.tokcard {
+  background: var(--term); border: 1px solid var(--term-edge); border-radius: 7px; padding: 10px 14px;
+  font: 14px/1.9 var(--mono); color: var(--term-ink);
+}
+.tokcard .row { white-space: nowrap; overflow: hidden; }
+.tokcard .thought-row { color: var(--term-dim); font-style: italic; }
+.tok { border-radius: 3px; padding: 1px 0; transition: background-color .3s ease, box-shadow .2s ease, color .3s ease; }
+.tok.cur { box-shadow: 0 0 0 1.5px var(--term-ink); }
+.tok.scored { color: var(--term-ink); }
+
+.dist { display: grid; grid-template-columns: 9ch 1fr; row-gap: 9px; column-gap: 12px; align-items: center; font-size: 12.5px; min-height: 128px; align-content: start; }
+.dist .cand { text-align: right; color: var(--muted); white-space: pre; }
+.dist .cand.sampled { color: var(--ink); font-weight: 600; }
+.bars { display: flex; flex-direction: column; gap: 2px; }
+.bar { height: 9px; border-radius: 2px; width: 0; transition: width .35s ease; }
+.bar.a { background: var(--nohint); }
+.bar.b { background: var(--hint); }
+.score { display: flex; align-items: baseline; gap: 10px; font-size: 12px; color: var(--muted); min-height: 1.4em; }
+.score b { font-size: 15px; color: var(--ink); font-weight: 600; transition: color .3s ease; }
 
 @media (max-width: 520px) {
-  .stage { --h: 150px; --step: 2px; height: 430px; }
+  .stage { --h: 124px; --step: 3px; height: 390px; }
   .card { font-size: 11px; padding: 9px 11px; }
-  .row .t { width: 7ch; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .stage *, .stage { transition: none !important; }
+  .tokcard { font-size: 11px; }
+  .mini { height: 80px; }
 }
 </style>
 </head>
 <body>
 <figure>
-  <div class="stage" id="stage"></div>
+  <div class="stage" id="stage">
+    <div class="layer" id="deckLayer"></div>
+    <div class="layer learn hidden" id="learn">
+      <div class="contexts">
+        <div class="ctx">
+          <div class="mini" id="miniA"></div>
+          <div class="who"><span class="dot" style="background: var(--nohint)"></span>Qwen3.5-9B · no hint</div>
+        </div>
+        <div class="ctx">
+          <div class="mini" id="miniB"></div>
+          <div class="who"><span class="dot" style="background: var(--hint)"></span>Qwen3.5-9B · with hint</div>
+        </div>
+      </div>
+      <div class="tokcard" id="tokcard"></div>
+      <div class="dist" id="dist"></div>
+      <div class="score" id="score"></div>
+    </div>
+  </div>
 </figure>
 <script>
 // One stored base-model rollout (runs/train250, django__django-16485), cut down to one line per part of each turn.
@@ -562,37 +596,30 @@ const TRAJ = {
   ]
  ]
 };
-// The hint before turn 38 (runs/distill/10_after_hint_scored.jsonl), and for each token of turn 38's first
-// sentence: [token, KL(with hint || without hint), the with-hint model's top 4 as [token, p with hint, p without]].
-// KL as in training: the with-hint top-20 renormalized, the without-hint log-probs as they are.
-const HINT = "Note: you're close to your 40-turn limit, with about 3 turns left. You often keep exploring and forget to submit. Wrap up and call `task_complete`.";
-const HINT_TURN = 38;
-const TOKENS = [
- ["Let", 0.0844, [["Let", 0.814, 0.811], ["I", 0.16, 0.124], ["The", 0.007, 0.012], ["Given", 0.005, 0.0]]],
- [" me", 0.0, [[" me", 1.0, 1.0], [" just", 0.0, 0.0], ["'s", 0.0, 0.0], [" try", 0.0, 0.0]]],
- [" try", 0.3903, [[" run", 0.371, 0.116], [" try", 0.289, 0.522], [" just", 0.155, 0.116], [" look", 0.044, 0.103]]],
- [" running", 0.0226, [[" running", 0.553, 0.598], [" to", 0.296, 0.249], [" a", 0.14, 0.118], [" using", 0.005, 0.018]]],
- [" the", 0.0155, [[" the", 0.96, 0.925], [" a", 0.026, 0.032], [" tests", 0.012, 0.032], [" just", 0.001, 0.001]]],
- [" tests", 0.038, [[" tests", 0.822, 0.724], [" test", 0.162, 0.266], [" specific", 0.006, 0.004], [" Django", 0.002, 0.001]]],
- [" through", 0.1128, [[" using", 0.264, 0.275], [" directly", 0.233, 0.312], [" with", 0.141, 0.167], [" in", 0.097, 0.042]]],
- [" pytest", 0.1095, [[" a", 0.321, 0.174], [" the", 0.283, 0.286], [" Django", 0.172, 0.197], [" pytest", 0.063, 0.082]]],
- [",", 0.1242, [[" or", 0.28, 0.227], [" directly", 0.17, 0.121], [" with", 0.17, 0.2], [":", 0.08, 0.138]]],
- [" which", 0.1013, [[" which", 0.44, 0.281], [" or", 0.236, 0.248], [" but", 0.162, 0.281], [" since", 0.046, 0.038]]],
- [" should", 0.0237, [[" should", 0.465, 0.393], [" might", 0.32, 0.393], [" is", 0.118, 0.099], [" seems", 0.049, 0.053]]],
- [" find", 0.0658, [[" be", 0.555, 0.409], [" work", 0.337, 0.409], [" have", 0.046, 0.055], [" handle", 0.04, 0.081]]],
- [" the", 0.0123, [[" the", 0.874, 0.841], [" them", 0.038, 0.061], [" Django", 0.023, 0.029], [" and", 0.012, 0.014]]],
- [" tests", 0.0243, [[" settings", 0.326, 0.296], [" test", 0.288, 0.296], [" tests", 0.198, 0.179], [" right", 0.05, 0.058]]],
- [" and", 0.0787, [[" automatically", 0.367, 0.409], [" properly", 0.153, 0.103], [":", 0.153, 0.248], [" more", 0.082, 0.049]]],
- [" run", 0.1111, [[" run", 0.629, 0.569], [" settings", 0.262, 0.185], [" use", 0.019, 0.06], [" Django", 0.013, 0.025]]],
- [" them", 0.0009, [[" them", 0.999, 0.998], [" the", 0.0, 0.001], [" properly", 0.0, 0.0], [" with", 0.0, 0.0]]],
- [":", 0.0641, [[":", 0.582, 0.705], [" properly", 0.189, 0.123], [".", 0.115, 0.051], [" with", 0.037, 0.051]]]
-];
 </script>
 <script>
+// Steps 2 and 3 are illustrative: an invented turn 38 and next-token distributions shaped like the
+// real ones (with the hint, the model puts its mass on wrapping up; without it, on exploring more).
+const HINT_TURN = 38;
+const HINT = "Note: you're close to your 40-turn limit, with about 3 turns left. You often keep exploring and forget to submit. Wrap up and call `task_complete`.";
+// [token, candidates as [text, p without hint, p with hint]]; the first candidate is the token in the text
+const THOUGHT = [
+  ["Let", [["Let", .80, .62], ["I", .13, .18], ["All", .04, .15]]],
+  [" me", [[" me", .99, .99]]],
+  [" also", [[" also", .48, .07], [" run", .30, .09], [" wrap", .03, .36], [" submit", .02, .42]]],
+  [" run", [[" run", .62, .55], [" check", .25, .30], [" look", .08, .06]]],
+  [" the", [[" the", .86, .80], [" all", .10, .13]]],
+  [" i18n", [[" i18n", .70, .62], [" full", .15, .20], [" remaining", .10, .12]]],
+  [" tests", [[" tests", .97, .96]]],
+  [".", [[".", .62, .38], [" too", .25, .22], [" and", .05, .32]]],
+];
+const CALL = ["bash", "(", "cd", " tests", " &&", " python", " runtests", ".py", " i18n", ")"]
+  .map(t => [t, [[t, .98, .97]]]);
+
 const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const stage = document.getElementById("stage");
-const sleep = ms => reduced ? Promise.resolve() : new Promise(r => setTimeout(r, ms));
-const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
 
 // The real prompt wraps the GitHub issue in instructions to fix it in the repo; one line stands in for those
@@ -600,42 +627,49 @@ const ASK = "Fix this issue in the django repo:";
 const titleLine = TRAJ.problem.split("\n")[0];
 const codeLines = ["floatformat('0.00', 0)", "ValueError: valid range for prec is [1, MAX_PREC]"];
 const turns = TRAJ.turns;
+let deck = [];  // the user card, then one card per turn; the last one is in front
 
 async function typeInto(node, text, cps) {
-  if (reduced) { node.textContent = text; return; }
   for (let i = 1; i <= text.length; i += 2) { node.textContent = text.slice(0, i); await sleep(2000 / cps); }
   node.textContent = text;
 }
 
-// ---- Decks ------------------------------------------------------------------------------------------
+// ---- The deck ----
 
-function makeDeck() {
-  const deck = { el: el("div", "deck"), cards: [] };  // cards[0] is at the back, the last one in front
-  stage.append(deck.el);
-  return deck;
-}
-
-// Each card sits one step higher than the card in front of it
-function layout(deck, skipFront = false) {
+// Seen from slightly above: each card behind sits a step higher, a bit narrower and a bit darker
+const SHRINK = 0.0016, DIM = 0.006;
+// A loosely squared deck: each card keeps its own small offset and tilt once it's behind the front one
+const jitter = i => { const r = k => (Math.sin(i * 12.9898 + k * 78.233) * 43758.5453) % 1; return [r(1) * 3, r(2) * 0.45]; };
+function layout(skipFront = false) {
   const step = parseFloat(getComputedStyle(stage).getPropertyValue("--step"));
-  deck.cards.forEach((card, i) => {
-    if (skipFront && i === deck.cards.length - 1) return;
+  deck.forEach((card, i) => {
+    if (skipFront && i === deck.length - 1) return;
+    const depth = deck.length - 1 - i;
+    const [dx, rot] = depth ? jitter(Number(card.dataset.seed)) : [0, 0];
     card.style.zIndex = i;
-    card.style.transform = `translateY(${-(deck.cards.length - 1 - i) * step}px)`;
-    card.classList.toggle("front", i === deck.cards.length - 1);
+    card.style.transform = `translateY(${-depth * step}px) translateX(${dx}px) rotate(${rot}deg) scaleX(${1 - depth * SHRINK})`;
+    card.style.filter = `brightness(${1 - Math.min(depth * DIM, 0.35)})`;
+    card.classList.toggle("front", depth === 0);
   });
 }
 
-async function deal(deck, card, from = "translateY(28px)") {  // slides the card onto the front of the deck
-  card.style.transform = from;  // opaque from the start, so the cards behind never show through
-  deck.el.append(card);
-  deck.cards.push(card);
-  layout(deck, true);
-  await frame();
-  layout(deck);
+function deal(card, seed) {  // slides the card in from below, onto the front of the deck
+  card.dataset.seed = seed;
+  card.style.transform = "translateY(28px)";  // opaque from the start, so the cards behind never show through
+  $("deckLayer").append(card);
+  deck.push(card);
+  layout(true);
+  requestAnimationFrame(() => requestAnimationFrame(() => layout()));
 }
 
-// ---- Cards ------------------------------------------------------------------------------------------
+async function takeFront() {  // the front card drops away
+  const card = deck.pop();
+  card.style.transform = "translateY(40px)";
+  card.style.opacity = 0;
+  layout();
+  await sleep(30);
+  setTimeout(() => card.remove(), 300);
+}
 
 function userCard() {
   const card = el("div", "card user"), ask = el("div", "line ask"), text = el("span"), issue = el("div", "issue");
@@ -643,6 +677,13 @@ function userCard() {
   issue.append(el("div", "title", titleLine), ...codeLines.map(l => el("div", "", l)));
   card.append(ask, issue);
   return { card, ask: text, issue };
+}
+
+function hintCard() {
+  const card = el("div", "card hint"), ask = el("div", "wrap ask"), text = el("span");
+  ask.append(el("span", "mark", ">"), text);
+  card.append(ask);
+  return { card, text };
 }
 
 // One turn as a terminal agent prints it: its thinking, its tool call, and the call's output
@@ -660,35 +701,31 @@ function turnCard(t) {
   return { card, th: thText, code, o, oText, thought, cmd, out };
 }
 
-function hintCard() {
-  const card = el("div", "card hint"), line = el("div", "hint-text"), text = el("span");
-  line.append(el("span", "mark", ">"), text);
-  card.append(el("div", "head", "hint"), line);
-  return { card, text };
+function fill(c) {
+  c.th.textContent = c.thought; c.code.textContent = c.cmd;
+  c.oText.textContent = c.out; c.o.style.visibility = c.out ? "" : "hidden";
 }
 
-// Turn 38, already written: its tokens get scored one at a time
-function scoredCard() {
-  const card = el("div", "card"), line = el("div", "thought scored"), tokens = el("span", "tokens");
-  tokens.append(...TOKENS.map(([tok]) => el("span", "tok", tok)));
-  line.append(el("span", "mark", "✻"), tokens);
-  card.append(el("div", "head", `turn ${HINT_TURN}`), line);
-  return card;
+// The turn the hint goes before, as step 3 scores it (the stored text stands in for THOUGHT and CALL)
+function storedTurnCard() {
+  const c = turnCard(HINT_TURN);
+  c.thought = THOUGHT.map(t => t[0]).join("");
+  c.cmd = CALL.slice(2, -1).map(t => t[0]).join("");
+  c.out = "";
+  fill(c);
+  return c;
 }
 
-// ---- Step 1: the rollout -------------------------------------------------------------------------------
-
-async function turn(deck, t, typed) {
+async function turn(t, typed) {
   const c = turnCard(t);
-  const showOut = () => { c.oText.textContent = c.out; c.o.style.visibility = c.out ? "" : "hidden"; };
-  if (!typed) { c.th.textContent = c.thought; c.code.textContent = c.cmd; showOut(); }
-  deal(deck, c.card);
+  if (!typed) fill(c);
+  deal(c.card, t);
   if (typed) {
     await sleep(200);
     await typeInto(c.th, c.thought, 260);
     await typeInto(c.code, c.cmd, 320);
     await sleep(120);
-    showOut();
+    c.oText.textContent = c.out; c.o.style.visibility = c.out ? "" : "hidden";
   }
 }
 
@@ -700,126 +737,168 @@ function gap(t) {
   return 40;
 }
 
-async function rollout(deck) {
+// ---- Step 3 ----
+
+function miniDeck(node, withHint) {
+  node.replaceChildren();
+  const n = 14;  // a few edges stand for the 37 turns before the hint
+  for (let i = 0; i < n; i++) {
+    const e = el("div", "edge");
+    e.style.bottom = `${(n - i) * 3.4 + 2}px`;
+    e.style.transform = `translateX(${jitter(i)[0] * 0.6}px) rotate(${jitter(i)[1] * 0.6}deg)`;
+    node.append(e);
+  }
+  const face = el("div", "face" + (withHint ? " hint" : ""));
+  if (withHint) face.append(el("b", "", "> "), HINT);
+  else face.textContent = `turn ${HINT_TURN - 1} · ` + turns[HINT_TURN - 2][0];
+  node.append(face);
+}
+
+// KL(with hint ‖ no hint) over the candidates, plus the rest of the vocabulary as one bucket
+function kl(cands) {
+  const rest = side => Math.max(1 - cands.reduce((s, c) => s + c[side], 0), 1e-3);
+  const terms = cands.map(c => [c[1], c[2]]).concat([[rest(1), rest(2)]]);
+  return Math.max(0, terms.reduce((s, [a, b]) => s + b * Math.log(b / a), 0));
+}
+
+// Green for tokens the hint barely changes, red for the ones it changes most
+function klColor(k, alpha) {
+  const x = Math.min(k / 1.5, 1);
+  const g = [108, 194, 135], r = [229, 83, 75];
+  const c = g.map((v, i) => Math.round(v + (r[i] - v) * x));
+  return `rgb(${c.join(" ")} / ${alpha})`;
+}
+
+function buildTokens() {
+  const card = $("tokcard");
+  card.replaceChildren();
+  const rows = [["thought-row", "✻ ", THOUGHT], ["", "⏺ ", CALL]];
+  const spans = [];
+  for (const [cls, mark, toks] of rows) {
+    const row = el("div", "row " + cls);
+    row.append(el("span", "", mark));
+    for (const [text, cands] of toks) {
+      const s = el("span", "tok", text);
+      row.append(s);
+      spans.push({ s, cands });
+    }
+    card.append(row);
+  }
+  return spans;
+}
+
+function showDist(cands) {
+  const dist = $("dist");
+  const shown = [...cands].sort((a, b) => Math.max(b[1], b[2]) - Math.max(a[1], a[2]));
+  // Reuse four rows so the bars animate from one token's distribution to the next
+  if (!dist.children.length) {
+    for (let i = 0; i < 4; i++) {
+      const bars = el("div", "bars");
+      bars.append(el("div", "bar a"), el("div", "bar b"));
+      dist.append(el("div", "cand"), bars);
+    }
+  }
+  for (let i = 0; i < 4; i++) {
+    const c = shown[i], label = dist.children[2 * i], bars = dist.children[2 * i + 1];
+    label.textContent = c ? JSON.stringify(c[0]).slice(1, -1) : "";
+    label.classList.toggle("sampled", !!c && c[0] === cands[0][0]);
+    bars.children[0].style.width = c ? `${c[1] * 100}%` : "0";
+    bars.children[1].style.width = c ? `${c[2] * 100}%` : "0";
+  }
+}
+
+function showScore(k) {
+  const score = $("score");
+  score.replaceChildren(el("span", "", "KL ="), el("b", "", k.toFixed(2)));
+  score.lastChild.style.color = klColor(k, 1);
+}
+
+async function score(spans, i, hold) {
+  const { s, cands } = spans[i];
+  spans.forEach(x => x.s.classList.remove("cur"));
+  s.classList.add("cur");
+  $("score").replaceChildren();
+  showDist(cands);
+  await sleep(hold * 0.55);
+  const k = kl(cands);
+  s.style.backgroundColor = klColor(k, 0.45);
+  s.classList.add("scored");
+  showScore(k);
+  await sleep(hold * 0.45);
+}
+
+// ---- The loop ----
+
+function reset() {
+  $("deckLayer").replaceChildren();
+  $("deckLayer").classList.remove("hidden");
+  $("learn").classList.add("hidden");
+  $("dist").replaceChildren();
+  $("score").replaceChildren();
+  deck = [];
+}
+
+async function play() {
+  reset();
+
+  // 1. The rollout: the model works on the task turn by turn, and the turns stack into a deck
   const u = userCard();
-  deal(deck, u.card);
+  deal(u.card, 0);
   await sleep(350);
   await typeInto(u.ask, ASK, 90);
   await sleep(150);
   u.issue.classList.add("show");  // pasted, not typed
   await sleep(1100);
-  for (let t = 1; t <= 2; t++) { await turn(deck, t, true); await sleep(t === 1 ? 850 : 350); }
-  for (let t = 3; t <= turns.length; t++) { await turn(deck, t, false); await sleep(gap(t)); }
-  await sleep(1100);
-  deck.cards.forEach(c => c.classList.add("frozen"));
-  await sleep(1300);
-}
+  for (let t = 1; t <= 2; t++) { await turn(t, true); await sleep(t === 1 ? 850 : 350); }
+  for (let t = 3; t <= turns.length; t++) { await turn(t, false); await sleep(gap(t)); }
+  await sleep(1000);
+  deck.forEach(c => c.classList.add("frozen"));
+  await sleep(1600);
 
-// ---- Step 2: the hint goes in before turn 38 ---------------------------------------------------------
-
-async function insertHint(deck) {
+  // 2. The hint: back to turn 38, a hint goes in before it, and the stored turn 38 goes back on top
+  while (deck.length > HINT_TURN) await takeFront();
+  await sleep(500);
   const h = hintCard();
-  await deal(deck, h.card);
+  deal(h.card, 1000);
   await sleep(300);
   await typeInto(h.text, HINT, 110);
-  await sleep(700);
-  // Turns 38 onwards slide out from behind it, so it sits right after turn 37
-  const after = deck.cards.slice(HINT_TURN, -1);  // cards[0] is the task, cards[t] is turn t
-  for (const card of after) {  // one block, pulled out to the side
-    card.classList.add("leaving");
-    card.style.transform += " translateX(85%)";
-  }
-  await sleep(750);
-  deck.cards = [...deck.cards.slice(0, HINT_TURN), h.card];
-  layout(deck);
-  await sleep(reduced ? 0 : 900);
-  after.forEach(card => card.remove());
-  // Turn 38 comes back on top: the text the model wrote right there, now read after the hint
-  await deal(deck, scoredCard(), "translateX(70%)");
-  await sleep(1000);
-}
+  await sleep(900);
+  const stored = storedTurnCard();
+  stored.card.classList.add("frozen");
+  deal(stored.card, HINT_TURN);
+  await sleep(1300);
 
-// ---- Step 3: the same model reads turn 38 with and without the hint -------------------------------------
-
-function distribution(side, label) {
-  const box = el("div", `below ${side}`), title = el("div", "deck-label");
-  title.innerHTML = label;
-  const rows = [0, 1, 2, 3].map(() => {
-    const row = el("div", "row"), t = el("span", "t"), track = el("span", "track"), bar = el("div", "bar"), p = el("span", "p");
-    track.append(bar); row.append(t, track, p); box.append(row);
-    return { row, t, bar, p };
-  });
-  box.prepend(title);
-  stage.append(box);
-  return { box, rows };
-}
-
-const visible = tok => tok.replace(/^ /, "␣").replace(/\n/g, "↵");
-const tint = kl => `rgb(var(--hint-rgb) / ${Math.min(1, Math.pow(kl / 0.4, 0.7)) * 0.85})`;
-
-function show(dist, i, which) {
-  const [written, , top] = TOKENS[i];
-  dist.rows.forEach((r, k) => {
-    const [tok, pWith, pWithout] = top[k];
-    const p = which === "with" ? pWith : pWithout;
-    r.t.textContent = visible(tok);
-    r.bar.style.width = `${p * 100}%`;
-    r.p.textContent = p.toFixed(2).replace(/^0/, "");
-    r.row.classList.toggle("written", tok === written);
-  });
-}
-
-async function compare(withHint) {
-  // A copy of the deck without the hint card, beside the original
-  const without = { el: withHint.el.cloneNode(true), cards: [] };
-  without.cards = [...without.el.children];
-  stage.append(without.el);
-  await frame();
-  withHint.el.style.right = "calc(50% + 10px)";
-  without.el.style.left = "calc(50% + 10px)";
-  for (const d of [withHint, without]) d.el.style.bottom = "var(--below)";
-  const hintCopy = without.cards[HINT_TURN];
-  without.cards.splice(HINT_TURN, 1);
-  hintCopy.classList.add("leaving");
-  hintCopy.style.transform += " translateY(-40px)";
-  layout(without);
-  await sleep(700);
-  hintCopy.remove();
-
-  const left = distribution("left", "<b>with hint</b>");
-  const right = distribution("right", "without hint");
-  const kl = el("div", "kl");
-  stage.append(kl);
-  const toks = [withHint, without].map(d => [...d.cards.at(-1).querySelectorAll(".tok")]);
-  await sleep(300);
-
-  for (let i = 0; i < TOKENS.length; i++) {
-    const slow = i <= 2;
-    toks.forEach(ts => ts[i].classList.add("now"));
-    show(left, i, "with"); show(right, i, "without");
-    if (i === 0) { await frame(); left.box.classList.add("show"); right.box.classList.add("show"); kl.classList.add("show"); }
-    kl.innerHTML = `KL ${TOKENS[i][1].toFixed(2)}<span class="chip" style="background:${tint(TOKENS[i][1])}"></span>`;
-    await sleep(slow ? (i === 2 ? 2600 : 1300) : 230);
-    toks.forEach(ts => { ts[i].classList.remove("now"); ts[i].classList.add("done"); ts[i].style.backgroundColor = tint(TOKENS[i][1]); });
-  }
+  // 3. Learning: score each stored token in both contexts and compare
+  miniDeck($("miniA"), false);
+  miniDeck($("miniB"), true);
+  const spans = buildTokens();
+  $("deckLayer").classList.add("hidden");
+  $("learn").classList.remove("hidden");
+  await sleep(800);
+  await score(spans, 0, 1500);
+  await score(spans, 1, 900);
+  await score(spans, 2, 3200);
+  for (let i = 3; i < spans.length; i++) await score(spans, i, i < THOUGHT.length ? 450 : 160);
+  spans.forEach(x => x.s.classList.remove("cur"));
   await sleep(2200);
+  $("learn").classList.add("hidden");
+  await sleep(600);
 }
 
-// ---- The loop ---------------------------------------------------------------------------------------------
-
-async function play() {
-  stage.classList.remove("fading");
-  stage.replaceChildren();
-  const deck = makeDeck();
-  await rollout(deck);
-  await insertHint(deck);
-  await compare(deck);
-  if (reduced) return;
-  stage.classList.add("fading");
-  await sleep(700);
+function still() {  // reduced motion: step 3's end state, no animation
+  reset();
+  miniDeck($("miniA"), false);
+  miniDeck($("miniB"), true);
+  const spans = buildTokens();
+  spans.forEach(({ s, cands }) => { s.style.backgroundColor = klColor(kl(cands), 0.45); s.classList.add("scored"); });
+  spans[2].s.classList.add("cur");
+  showDist(spans[2].cands);
+  showScore(kl(spans[2].cands));
+  $("deckLayer").classList.add("hidden");
+  $("learn").classList.remove("hidden");
 }
 
-if (reduced) play();
+if (reduced) still();
 else (async () => { for (;;) await play(); })();
 </script>
 </body>
