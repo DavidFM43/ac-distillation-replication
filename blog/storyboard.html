@@ -31,7 +31,7 @@ svg text { font-family: var(--mono); }
 <body>
 <main>
   <h1>Headline figure: storyboard</h1>
-  <p class="note">Static frames, before any animation. The captions are notes for us, not part of the figure. Frames 4–6 come in two versions to choose from.</p>
+  <p class="note">Static frames, before any animation. The captions are notes for us, not part of the figure.</p>
   <div id="frames"></div>
 </main>
 <script>
@@ -148,109 +148,60 @@ const mix = k => {
   return `rgb(${g.map((v, i) => Math.round(v + (r[i] - v) * x)).join(" ")})`;
 };
 
-function tokenCells(svg, y, x0) {
+// Step 4: the target tokens, scored one at a time.
+// At the token in focus: the teacher's distribution over what goes there (above) and the student's (below),
+// over the same candidates in the same order; the bold label is the target token itself.
+const ROW_Y = 92, CELL_H = 24;
+
+function targetRow(svg, { focus = null, scored = 0 } = {}) {
   const cells = [];
-  let x = x0;
-  for (const t of TOKENS) {
-    const w = Math.max(t.trim().length * 7.4 + 14, 30);
-    svg.append(s("rect", { x, y, width: w, height: 22, rx: 4, fill: css("fixed"), stroke: css("turn") }));
-    T(svg, x + w / 2, y + 15, t.trim(), { "text-anchor": "middle", fill: css("ink"), "font-size": 11.5 });
+  let x = 150;
+  TOKENS.forEach((t, i) => {
+    const w = Math.max(t.trim().length * 8 + 16, 32);
+    const done = i < scored, dim = focus !== null && i !== focus && !done;
+    svg.append(s("rect", { x, y: ROW_Y, width: w, height: CELL_H, rx: 4,
+      fill: done ? mix(kl(NEXT[i])) : css("fixed"), stroke: i === focus ? css("ink") : css("turn"),
+      "stroke-width": i === focus ? 1.5 : 1, opacity: dim ? .35 : 1 }));
+    T(svg, x + w / 2, ROW_Y + 16, t.trim(), { "text-anchor": "middle", fill: css("ink"), "font-size": 12, opacity: dim ? .35 : 1 });
     cells.push({ x, w, c: x + w / 2 });
-    x += w + 12;
-  }
+    x += w + 8;
+  });
   return cells;
 }
 
-// Version A: by each token, a small bar chart of what the model would put there
-// (the same candidates in the same order for both models; the solid bar is the token in the rollout)
-function bars(svg, cell, i, base, dir, side, color) {
-  const cands = NEXT[i], bw = 6, gap = 2, H = 30;
+function chart(svg, cell, i, who) {
+  const above = who === "teacher", side = above ? 2 : 1, color = css(who);
+  const cands = NEXT[i], bw = 22, gap = 12, H = 50;
   const x0 = cell.c - (cands.length * (bw + gap) - gap) / 2;
+  const base = above ? ROW_Y - 22 : ROW_Y + CELL_H + 22;
   cands.forEach((cand, k) => {
-    const h = Math.max(1.5, cand[side] * H), x = x0 + k * (bw + gap);
-    svg.append(s("rect", { x, y: dir < 0 ? base - h : base, width: bw, height: h, rx: 1, fill: color, opacity: k === 0 ? 1 : .5 }));
+    const hgt = Math.max(2, cand[side] * H), x = x0 + k * (bw + gap);
+    svg.append(s("rect", { x, y: above ? base - hgt : base, width: bw, height: hgt, rx: 2, fill: color }));
+    T(svg, x + bw / 2, above ? base + 11 : base - 4, cand[0].trim(), { "text-anchor": "middle", "font-size": 9.5,
+      ...(k === 0 ? { fill: css("ink"), "font-weight": 700 } : {}) });  // the target token's label in bold
   });
-  if (i === KEY) {
-    const top = [...cands].sort((a, b) => b[side] - a[side])[0];
-    T(svg, cell.c, dir < 0 ? base - H - 6 : base + H + 13, `${top[0].trim()} ${Math.round(top[side] * 100)}%`,
-      { "text-anchor": "middle", "font-size": 10, fill: color });
-  }
+  svg.append(s("line", { x1: x0 - 6, x2: x0 + cands.length * (bw + gap) - gap + 6, y1: base, y2: base, stroke: css("turn") }));
+  // who is reading, and with what context
+  const ly = above ? base - H / 2 : base + H / 2;
+  svg.append(s("rect", { x: 0, y: ly - 8, width: 34, height: 16, rx: 3, fill: css("turn") }));
+  if (above) svg.append(s("rect", { x: 27, y: ly - 8, width: 7, height: 16, rx: 2, fill: css("hint") }));
+  T(svg, 42, ly + 4, who, { fill: color });
 }
 
-function versionA(svg, { score = false, trained = false } = {}) {
-  const sy = 60, ty = 96;  // the two token rows
-  // Each row continues its own context: the rollout so far, and for the teacher the hint
-  svg.append(s("rect", { x: 44, y: sy, width: 46, height: 22, rx: 4, fill: css("turn") }));
-  svg.append(s("rect", { x: 44, y: ty, width: 46, height: 22, rx: 4, fill: css("turn") }));
-  svg.append(s("rect", { x: 80, y: ty, width: 10, height: 22, rx: 2, fill: css("hint") }));
-  T(svg, 0, sy + 15, "student", { fill: css("student") });
-  T(svg, 0, ty + 15, "teacher", { fill: css("teacher") });
-  const a = tokenCells(svg, sy, 104), b = tokenCells(svg, ty, 104);
-  a.forEach((cell, i) => bars(svg, cell, i, sy - 4, -1, trained ? 2 : 1, css("student")));
-  b.forEach((cell, i) => bars(svg, cell, i, ty + 26, 1, 2, css("teacher")));
-  if (score) {
-    a.forEach((cell, i) => svg.append(s("circle", { cx: cell.c, cy: (sy + 22 + ty) / 2, r: 4.5,
-      fill: mix(kl(NEXT[i], trained ? 2 : 1)) })));
-  }
+function step4(svg, { focus = null, show = [], scored = 0 } = {}) {
+  const cells = targetRow(svg, { focus, scored });
+  T(svg, 0, ROW_Y + 16, "target");
+  for (const who of show) chart(svg, cells[focus], focus, who);
 }
 
-heading("Version A: a small bar chart per token");
-
-frame("4A", "Zoom into one turn after the hint. Both models read the same fixed tokens. At each one, a small chart of what the model would put there. They agree almost everywhere, except at “also”: the teacher would rather submit.", 600, 160, svg => versionA(svg));
-
-frame("5A", "Compare the two charts at each token (KL). Green: the hint changes nothing. Red: it changes what the model would do.", 600, 160, svg => versionA(svg, { score: true }));
-
-frame("6A", "Training pulls the student's charts toward the teacher's. The red goes away: the student now leans toward wrapping up, without the hint.", 600, 160, svg => versionA(svg, { score: true, trained: true }));
-
-// Version B: each model's tree of continuations, laid out the same way for both.
-// The fixed rollout is the gray path through it; branch thickness is the model's probability.
-const W = p => 1 + p * 9;
-function tree(svg, y, side, color, label, hint) {
-  const dx = 66, x0 = 110;
-  const px = i => x0 + i * dx;
-  // the fixed rollout, as a gray band under its path
-  svg.append(s("line", { x1: px(0), x2: px(TOKENS.length), y1: y, y2: y, stroke: css("fixed"), "stroke-width": 16, "stroke-linecap": "round" }));
-  svg.append(s("rect", { x: px(0) - 52, y: y - 9, width: 40, height: 18, rx: 4, fill: css("turn") }));
-  if (hint) svg.append(s("rect", { x: px(0) - 20, y: y - 9, width: 8, height: 18, rx: 2, fill: css("hint") }));
-  T(svg, 0, y + 4, label, { fill: color });
-  const edge = (x1, y1, x2, y2, p) => svg.append(s("path", {
-    d: `M${x1},${y1} C${x1 + dx * .5},${y1} ${x2 - dx * .5},${y2} ${x2},${y2}`,
-    stroke: color, "stroke-width": W(p), fill: "none", "stroke-linecap": "round" }));
-  NEXT.forEach((cands, i) => {
-    // the branch into the rollout's token
-    edge(px(i), y, px(i + 1), y, cands[0][side]);
-    // the other branches, only where they carry real weight; at the key token they grow a step further
-    let k = 0;
-    for (const c of cands.slice(1)) {
-      if (Math.max(c[1], c[2]) < 0.12) continue;
-      k++;
-      const by = y - k * 19;
-      edge(px(i), y, px(i + 1), by, c[side]);
-      T(svg, px(i + 1) + 5, by + 4, c[0].trim(), { "font-size": 10 });
-      if (i === KEY && c[0] === " submit") {  // the tree keeps growing past the token it would submit with
-        const lx = px(i + 1) + 5 + c[0].trim().length * 6.2 + 6;
-        edge(lx, by, lx + 30, by, c[side] * .95);
-        T(svg, lx + 35, by + 4, "task_complete", { "font-size": 10 });
-      }
-    }
-  });
-  TOKENS.forEach((t, i) => {
-    svg.append(s("circle", { cx: px(i + 1), cy: y, r: 2.5, fill: css("ink") }));
-    T(svg, px(i + 1), y + 22, t.trim(), { "text-anchor": "middle", fill: css("ink"), "font-size": 10.5 });
-  });
-}
-
-heading("Version B: two trees");
-
-frame("4B", "Each model's tree of what could come next, drawn the same way for both. The gray band is the fixed rollout. The student's weight stays on the rollout's path; at “also” the teacher's moves to submit and wrap.", 600, 230, svg => {
-  tree(svg, 75, 1, css("student"), "student", false);
-  tree(svg, 190, 2, css("teacher"), "teacher", true);
-});
-
-frame("6B", "After training, the student's tree has the teacher's shape.", 600, 230, svg => {
-  tree(svg, 75, 2, css("student"), "student", false);
-  tree(svg, 190, 2, css("teacher"), "teacher", true);
-});
+frame("4.1", "The target: the fixed tokens of the turns after the hint (one turn shown).", 600, 190, svg => step4(svg));
+frame("4.2", "Focus on the first token; the rest wait.", 600, 190, svg => step4(svg, { focus: 0 }));
+frame("4.3", "The teacher (with the hint): how likely is each token here?", 600, 190, svg => step4(svg, { focus: 0, show: ["teacher"] }));
+frame("4.4", "The student (no hint), on the same token.", 600, 190, svg => step4(svg, { focus: 0, show: ["teacher", "student"] }));
+frame("4.5", "Compare the two (KL): nearly the same, so green.", 600, 190, svg => step4(svg, { focus: 0, show: ["teacher", "student"], scored: 1 }));
+frame("4.6", "Next token, same thing.", 600, 190, svg => step4(svg, { focus: 1, show: ["teacher", "student"], scored: 2 }));
+frame("4.7", "Here the hint matters: the teacher would rather submit or wrap up, the student goes on. Red.", 600, 190, svg => step4(svg, { focus: 2, show: ["teacher", "student"], scored: 3 }));
+frame("4.8", "Every target token gets a score. Training lowers them, pulling the student toward the teacher.", 600, 190, svg => step4(svg, { scored: TOKENS.length }));
 
 heading("Then");
 
