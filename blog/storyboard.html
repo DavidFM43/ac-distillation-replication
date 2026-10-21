@@ -149,16 +149,17 @@ const mix = k => {
 };
 
 // Step 4: the target tokens, scored one at a time.
-// At the token in focus: the teacher's distribution over what goes there (above) and the student's (below),
-// over the same candidates in the same order; the bold label is the target token itself.
-const ROW_Y = 92, CELL_H = 24;
+// To score a token, each model reads its own context right before it: the student the rollout so far,
+// the teacher the rollout so far plus the hint. Each model's chart is its distribution over what goes
+// there, over the same candidates in the same order; the bold label is the target token itself.
+const ROW_Y = 104, CELL_H = 24, TOK_X = 250;
 
 function targetRow(svg, { focus = null, scored = 0 } = {}) {
   const cells = [];
-  let x = 150;
+  let x = TOK_X;
   TOKENS.forEach((t, i) => {
     const w = Math.max(t.trim().length * 8 + 16, 32);
-    const done = i < scored, dim = focus !== null && i !== focus && !done;
+    const done = i < scored, dim = focus !== null && i > focus && !done;
     svg.append(s("rect", { x, y: ROW_Y, width: w, height: CELL_H, rx: 4,
       fill: done ? mix(kl(NEXT[i])) : css("fixed"), stroke: i === focus ? css("ink") : css("turn"),
       "stroke-width": i === focus ? 1.5 : 1, opacity: dim ? .35 : 1 }));
@@ -169,11 +170,28 @@ function targetRow(svg, { focus = null, scored = 0 } = {}) {
   return cells;
 }
 
+// The context a model reads, laid right before the target tokens: the task, the turns so far, and
+// for the teacher the hint. Outlined in the model's color.
+function context(svg, who) {
+  const bw = 16, g = 4, n = 7, hint = who === "teacher";
+  const blocks = ["task", ...Array(n).fill("turn"), ...(hint ? ["hint"] : [])];
+  let x = TOK_X - 10 - blocks.length * (bw + g) + g;
+  const x0 = x;
+  for (const b of blocks) {
+    svg.append(s("rect", { x, y: ROW_Y + 1, width: bw, height: CELL_H - 2, rx: 3, fill: css(b) }));
+    x += bw + g;
+  }
+  svg.append(s("rect", { x: x0 - 4, y: ROW_Y - 3, width: x - g - x0 + 8, height: CELL_H + 6, rx: 6,
+    fill: "none", stroke: css(who), "stroke-width": 1.5 }));
+  T(svg, x0 - 4, ROW_Y - 10, hint ? "rollout + hint" : "rollout",
+    { "font-size": 9.5, fill: css(who) });
+}
+
 function chart(svg, cell, i, who) {
   const above = who === "teacher", side = above ? 2 : 1, color = css(who);
   const cands = NEXT[i], bw = 22, gap = 12, H = 50;
   const x0 = cell.c - (cands.length * (bw + gap) - gap) / 2;
-  const base = above ? ROW_Y - 22 : ROW_Y + CELL_H + 22;
+  const base = above ? ROW_Y - 20 : ROW_Y + CELL_H + 20;
   cands.forEach((cand, k) => {
     const hgt = Math.max(2, cand[side] * H), x = x0 + k * (bw + gap);
     svg.append(s("rect", { x, y: above ? base - hgt : base, width: bw, height: hgt, rx: 2, fill: color }));
@@ -181,27 +199,37 @@ function chart(svg, cell, i, who) {
       ...(k === 0 ? { fill: css("ink"), "font-weight": 700 } : {}) });  // the target token's label in bold
   });
   svg.append(s("line", { x1: x0 - 6, x2: x0 + cands.length * (bw + gap) - gap + 6, y1: base, y2: base, stroke: css("turn") }));
-  // who is reading, and with what context
-  const ly = above ? base - H / 2 : base + H / 2;
-  svg.append(s("rect", { x: 0, y: ly - 8, width: 34, height: 16, rx: 3, fill: css("turn") }));
-  if (above) svg.append(s("rect", { x: 27, y: ly - 8, width: 7, height: 16, rx: 2, fill: css("hint") }));
-  T(svg, 42, ly + 4, who, { fill: color });
+  T(svg, x0 + cands.length * (bw + gap) + 4, above ? base - H / 2 : base + H / 2 + 4, who, { fill: color });
 }
 
-function step4(svg, { focus = null, show = [], scored = 0 } = {}) {
+function step4(svg, { focus = null, show = [], reading = null, scored = 0 } = {}) {
   const cells = targetRow(svg, { focus, scored });
-  T(svg, 0, ROW_Y + 16, "target");
+  if (reading) context(svg, reading);
   for (const who of show) chart(svg, cells[focus], focus, who);
+  return cells;
 }
 
-frame("4.1", "The target: the fixed tokens of the turns after the hint (one turn shown).", 600, 190, svg => step4(svg));
-frame("4.2", "Focus on the first token; the rest wait.", 600, 190, svg => step4(svg, { focus: 0 }));
-frame("4.3", "The teacher (with the hint): how likely is each token here?", 600, 190, svg => step4(svg, { focus: 0, show: ["teacher"] }));
-frame("4.4", "The student (no hint), on the same token.", 600, 190, svg => step4(svg, { focus: 0, show: ["teacher", "student"] }));
+frame("4.1", "The target: the tokens of the fixed turns after the hint, straight from the rollout. One turn shown.", 600, 150, svg => {
+  const { xs } = row(svg, 6);
+  outlineFixed(svg, xs, 6);
+  const cells = targetRow(svg, {});
+  // one fixed turn opens up into its tokens
+  const bx = xs[HINT_AT], last = cells[cells.length - 1];
+  svg.append(s("path", { d: `M${bx},${6 + BH} L${bx + BW},${6 + BH} L${last.x + last.w},${ROW_Y - 2} L${TOK_X},${ROW_Y - 2} Z`,
+    fill: css("fixed"), opacity: .6 }));
+  svg.append(s("rect", { x: bx, y: 6, width: BW, height: BH, rx: 4, fill: "none", stroke: css("ink"), "stroke-width": 1.5 }));
+  targetRow(svg, {});  // drawn again on top of the zoom
+  T(svg, 0, ROW_Y + 16, "target");
+});
+frame("4.2", "Focus on the first token; the ones after it wait.", 600, 190, svg => step4(svg, { focus: 0 }));
+frame("4.3", "The student reads its context, the rollout up to here, and gives its distribution for this token.", 600, 190,
+  svg => step4(svg, { focus: 0, reading: "student", show: ["student"] }));
+frame("4.4", "Now swap in the teacher's context: the same rollout plus the hint. Same model, one extra block, and its distribution for the same token.", 600, 190,
+  svg => step4(svg, { focus: 0, reading: "teacher", show: ["teacher", "student"] }));
 frame("4.5", "Compare the two (KL): nearly the same, so green.", 600, 190, svg => step4(svg, { focus: 0, show: ["teacher", "student"], scored: 1 }));
-frame("4.6", "Next token, same thing.", 600, 190, svg => step4(svg, { focus: 1, show: ["teacher", "student"], scored: 2 }));
+frame("4.6", "Next token, same thing. (The tokens before it are now part of both contexts.)", 600, 190, svg => step4(svg, { focus: 1, show: ["teacher", "student"], scored: 2 }));
 frame("4.7", "Here the hint matters: the teacher would rather submit or wrap up, the student goes on. Red.", 600, 190, svg => step4(svg, { focus: 2, show: ["teacher", "student"], scored: 3 }));
-frame("4.8", "Every target token gets a score. Training lowers them, pulling the student toward the teacher.", 600, 190, svg => step4(svg, { scored: TOKENS.length }));
+frame("4.8", "Every target token gets a score. Training lowers them, pulling the student toward the teacher.", 600, 120, svg => step4(svg, { scored: TOKENS.length }));
 
 heading("Then");
 
