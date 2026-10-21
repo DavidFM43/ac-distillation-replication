@@ -113,7 +113,7 @@ function figure(svg, STYLE) {
   const ROW_Y = 118, CELL_H = 24, TOK_X = 250;  // the target tokens
   const LOSS_Y = 298, LOSS_H = 34;  // the per-token loss strip: bars stand on this line
   const VIEW_RIGHT = 540;  // the focused token stays left of this as the row scrolls
-  const ACC_X0 = 60, ACC_X1 = 240, N_STREAM = 200;  // where the losses pile up during the speed-up, and how many tokens go by
+  const ACC_X0 = 60, ACC_X1 = 240, N_STREAM = 200, CENTER_Y = 190;  // where the losses pile up during the speed-up, and how many tokens go by
   const TOKENS_PER_TURN = 26;
   const POOL = ["Let", " me", " check", " the", " docs", ".", "bash", "(", "grep", " -r", " floatformat", ")", "Now", " run", " tests", "All", " pass"];
   const CHART = STYLE === "a" ? { slots: 9, gap: .55, sigma: .9 } : { slots: 30, gap: .35, sigma: 1.6 };
@@ -177,7 +177,8 @@ function figure(svg, STYLE) {
 
     // The training signal: every scored token's loss, packed side by side on the left as the stream goes by
     el.acc = s("g", { style: `transform-box: view-box; transform-origin: ${ACC_X0}px ${LOSS_Y}px` });
-    el.accCaption = s("text", { x: ACC_X0, y: LOSS_Y + 16, "font-size": 10, ...hidden }, "the training signal: one loss for every target token, across all the fixed turns");
+    s("line", { x1: ACC_X0, x2: ACC_X1, y1: LOSS_Y, y2: LOSS_Y, stroke: css("line"), "vector-effect": "non-scaling-stroke" }, null, el.acc);
+    el.accCaption = s("text", { x: ACC_X0, y: CENTER_Y + 18, "font-size": 10, ...hidden }, "the training signal: one loss for every target token, across all the fixed turns");
     el.nAcc = 0;
   }
 
@@ -386,8 +387,8 @@ function figure(svg, STYLE) {
       await sleep(380);
     }
 
-    // ...and on through every token of every fixed turn, faster and faster. The stream blurs, and
-    // each token's loss piles up on the left as it goes by.
+    // ...and on through every token of every fixed turn, faster and faster, each token's loss piling
+    // up on the left as it goes by.
     if (skipping) { skipping = false; svg.classList.remove("skip"); await sleep(300); }
     show(el.more, false);
     svg.classList.add("fast");
@@ -399,21 +400,20 @@ function figure(svg, STYLE) {
       focusOn(el.cells.length - 1);
       score(el.cells.length - 1, k, { number: false });
       absorb(cell);
-      const wait = Math.max(8, 70 - n * 1.2);
-      el.track.style.filter = wait < 30 ? `blur(${(30 - wait) / 12}px)` : "";  // a blur as it speeds up
+      const x = n / (N_STREAM - TOKENS.length);
       if (el.cells.length > 40) el.cells.shift().g.remove();  // tokens long gone off the left
-      await sleep(wait);
+      await sleep(4 + 32 * (1 - x) ** 2);  // accelerating: about 3 seconds for the whole stream
     }
     svg.classList.remove("fast");
-    el.track.style.filter = "";
     focusOn(null);
     await sleep(300);
 
-    // Pull back: the losses of every target token, spread across the frame
-    [el.track, el.lblLoss].forEach(e => show(e, false));
+    // Pull back: the losses of every target token move to the center and spread across the frame
+    [el.track, el.lblLoss, el.lossLine].forEach(e => show(e, false));
     await sleep(500);
     el.acc.style.transition = "transform 1.2s ease";
-    el.acc.style.transform = `scale(${(590 - ACC_X0) / (ACC_X1 - ACC_X0)}, 1.6)`;
+    el.acc.style.transform = `translate(0px, ${CENTER_Y - LOSS_Y}px) scale(${(590 - ACC_X0) / (ACC_X1 - ACC_X0)}, 1.8)`;
+    await sleep(900);
     show(el.accCaption);
     await sleep(5000);
     [el.acc, el.accCaption, el.lossLine].forEach(e => show(e, false));
