@@ -29,7 +29,7 @@ svg text { font-family: var(--mono); }
 </head>
 <body>
 <main>
-  <h1>Mirrored distributions: compact versions</h1>
+  <h1>Mirrored distributions: G4 variations</h1>
   <p class="note">Teacher above the line, student below, the same candidates in the same order. Each at “Let”, where they agree, and “also”, where the hint changes things. Bold is the token in the rollout.</p>
   <div id="opts"></div>
 </main>
@@ -222,10 +222,56 @@ function compact(svg, name, { other = false, tail = 3, sqrt = false, fade = fals
   });
 }
 
-option("G1", "The six likeliest tokens, plus one bar for everything else.", (svg, name) => compact(svg, name, { other: true }));
-option("G2", "The six likeliest tokens, then a few squeezed tail bars and “…”.", (svg, name) => compact(svg, name));
-option("G3", "Like G2, but the silhouette fades out to the right instead of running flat.", (svg, name) => compact(svg, name, { fade: true }));
-option("G4", "Like G2 with a square-root height scale: the tail is visible, but heights no longer read as probabilities.", (svg, name) => compact(svg, name, { sqrt: true }));
+
+// G4 variations: square-root heights, a Gaussian KDE over the bars, and optionally no token names
+function g4(svg, name, { slots = 9, labels = true, gap = .6, sigma = .9, W2 = 190 } = {}) {
+  const top = [...NAMED[name]].sort((a, b) => b[2] - a[2]), target = NAMED[name][0];
+  const named = top.slice(0, Math.min(slots, 8));
+  const rest = j => Math.max(1 - named.reduce((t, c) => t + c[j], 0), 0);
+  const n = slots - named.length;
+  const w = Array.from({ length: n }, (_, k) => 0.8 ** (k + 1)), Wt = w.reduce((a, b) => a + b, 0);
+  const d = named.map(c => [c[0].trim(), c[1], c[2], c === target])
+    .concat(w.map((v, k) => ["", rest(1) * v / Wt * (1 + .3 * Math.sin(k * 1.3 + 1)), rest(2) * v / Wt * (1 + .3 * Math.sin(k * 1.9)), false]));
+  const hgt = p => Math.sqrt(p) * H;
+  const x0 = X0 + (WIDTH - W2) / 2, slot = W2 / d.length, cx = k => x0 + (k + .5) * slot;
+  // KDE: a Gaussian bump under each bar, scaled so the curve sits just over the bars
+  const kde = j => {
+    const pts = [];
+    for (let x = x0 - slot; x <= x0 + W2 + slot * 1.5; x += 1) {
+      const v = d.reduce((t, c, k) => t + hgt(c[j]) * Math.exp(-((x - cx(k)) ** 2) / (2 * (sigma * slot) ** 2)), 0);
+      pts.push([x, v]);
+    }
+    const peak = Math.max(...pts.map(p => p[1])), top = Math.max(...d.map(c => hgt(c[j])));
+    return pts.map(([x, v]) => [x, v / peak * top * 1.08]);
+  };
+  for (const [j, dir, who] of [[2, -1, "teacher"], [1, 1, "student"]]) {
+    const pts = kde(j);
+    const path = `M${pts[0][0]},${MID} ` + pts.map(([x, v]) => `L${x.toFixed(1)},${(MID + dir * (1 + v)).toFixed(1)}`).join(" ") + ` L${pts[pts.length - 1][0]},${MID} Z`;
+    s("path", { d: path, fill: css(who), opacity: .25 }, null, svg);
+  }
+  d.forEach((c, k) => {
+    const bw = slot * (1 - gap), x = cx(k) - bw / 2;
+    s("rect", { x, y: MID - 1 - hgt(c[2]), width: bw, height: hgt(c[2]), fill: css("teacher") }, null, svg);
+    s("rect", { x, y: MID + 1, width: bw, height: hgt(c[1]), fill: css("student") }, null, svg);
+  });
+  s("line", { x1: x0 - slot, x2: x0 + W2 + slot * 1.5, y1: MID, y2: MID, stroke: css("turn") }, null, svg);
+  const tk = d.findIndex(c => c[3]);
+  if (labels) {
+    d.forEach((c, k) => {
+      if (!c[0]) return;
+      const lx = cx(k) + 3, ly = MID + H + 12;
+      s("text", { x: lx, y: ly, "text-anchor": "end", transform: `rotate(-40 ${lx} ${ly})`, ...(c[3] ? { fill: css("ink"), "font-weight": 700 } : {}) }, c[0], svg);
+    });
+  } else {
+    // no names: just mark the token in the rollout
+    s("path", { d: `M${cx(tk) - 4},${MID + H + 10} L${cx(tk) + 4},${MID + H + 10} L${cx(tk)},${MID + H + 4} Z`, fill: css("ink") }, null, svg);
+  }
+}
+
+option("G4", "For reference: square-root heights, curve through the bar tops.", (svg, name) => compact(svg, name, { sqrt: true }));
+option("G4a", "A smooth Gaussian KDE behind the bars, still with token names.", (svg, name) => g4(svg, name));
+option("G4b", "No token names: 30 bars packed close, the token in the rollout marked underneath.", (svg, name) => g4(svg, name, { slots: 30, labels: false, gap: .35, sigma: 1.6 }));
+option("G4c", "Like G4b, bars touching, so it reads as one shape.", (svg, name) => g4(svg, name, { slots: 30, labels: false, gap: .06, sigma: 1.6 }));
 </script>
 </body>
 </html>
