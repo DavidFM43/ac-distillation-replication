@@ -1,0 +1,703 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Self-distillation figure</title>
+<style>
+:root {
+  --bg: #fcfcfb;
+  --surface: #ffffff;
+  --ink: #1a1a19;
+  --muted: #6b6a66;
+  --faint: #a3a29d;
+  --line: #e6e5e1;
+  --accent: #2a78d6;
+  --accent-soft: #e8f0fb;
+  --warn: #b5651d;
+  --frozen: #c9c8c3;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sans: ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161615; --surface: #1f1f1e; --ink: #ecebe8; --muted: #a09f9a; --faint: #6b6a66;
+    --line: #2e2e2c; --accent: #5b9be6; --accent-soft: #1d2a3b; --warn: #d9904a; --frozen: #4a4a47;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #161615; --surface: #1f1f1e; --ink: #ecebe8; --muted: #a09f9a; --faint: #6b6a66;
+  --line: #2e2e2c; --accent: #5b9be6; --accent-soft: #1d2a3b; --warn: #d9904a; --frozen: #4a4a47;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); }
+figure { margin: 40px auto; max-width: 760px; padding: 0 16px; }
+
+.stage {
+  height: 460px; display: flex; flex-direction: column; gap: 14px;
+  padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg);
+}
+
+/* Cards */
+.card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 7px;
+  padding: 9px 12px; font-size: 13px; line-height: 1.45;
+  transition: filter 1.2s ease, opacity 1.2s ease, border-color 1.2s ease;
+}
+.task { border-left: 3px solid var(--ink); flex: none; }
+.task .who { font: 11px var(--mono); color: var(--muted); margin-bottom: 2px; }
+.task .title { font-weight: 600; min-height: 1.45em; }
+.task pre {
+  margin: 0; font: 11.5px/1.5 var(--mono); color: var(--muted); white-space: pre-wrap;
+}
+.collapse { display: grid; grid-template-rows: 1fr; transition: grid-template-rows .5s ease, opacity .5s ease; }
+.collapse > * { overflow: hidden; min-height: 0; }
+.collapse.shut { grid-template-rows: 0fr; opacity: 0; }
+
+/* The turns, newest at the bottom; older ones scroll up and fade out */
+.feed {
+  flex: 1; position: relative; overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 38%);
+          mask-image: linear-gradient(to bottom, transparent 0, #000 38%);
+}
+.feed-inner { position: absolute; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; }
+.slot { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .3s ease, opacity .3s ease; }
+.slot.open { grid-template-rows: 1fr; opacity: 1; }
+.slot > div { overflow: hidden; min-height: 0; }
+.slot .card { margin-top: 7px; display: flex; gap: 11px; }
+.tn { font: 11px/1.9 var(--mono); color: var(--faint); width: 20px; text-align: right; flex: none; }
+.body { min-width: 0; flex: 1; }
+.thought { color: var(--muted); min-height: 1.45em; }
+.call { font: 12px/1.5 var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.5em; }
+.tool {
+  display: inline-block; font: 10.5px/1.6 var(--mono); padding: 0 5px; margin-right: 6px;
+  border-radius: 3px; background: var(--accent-soft); color: var(--accent);
+}
+.tool.submit { background: var(--accent); color: var(--surface); }
+.tool.bad { background: transparent; color: var(--warn); padding: 0; }
+.out {
+  font: 11.5px/1.5 var(--mono); color: var(--faint); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; opacity: 0; transition: opacity .25s ease;
+}
+.out.show { opacity: 1; }
+.out::before { content: "→ "; }
+.out:empty { display: none; }
+
+/* The whole trajectory, one sliver per turn */
+.deck { flex: none; height: 38px; position: relative; }
+.track { position: absolute; left: 0; right: 0; top: 4px; height: 18px; }
+.sliver {
+  position: absolute; top: 0; height: 100%; border-radius: 1.5px; background: var(--accent);
+  transform: scaleY(0); transform-origin: bottom; transition: transform .2s ease, background-color 1.2s ease;
+}
+.sliver.in { transform: scaleY(1); }
+.sliver.submit { top: -5px; height: calc(100% + 5px); }
+.tick { position: absolute; top: 0; height: 26px; border-left: 1px dashed var(--faint); }
+.label { position: absolute; top: 25px; font: 10.5px var(--mono); color: var(--faint); transform: translateX(-50%); white-space: nowrap; }
+.counter { position: absolute; top: 25px; right: 0; font: 10.5px var(--mono); color: var(--muted); white-space: nowrap; transition: color 1.2s ease; }
+
+/* Once the rollout ends, it's fixed data */
+.frozen .card { filter: grayscale(1); opacity: .6; }
+.frozen .sliver { background: var(--frozen); }
+.frozen .counter { color: var(--faint); }
+.stage > * { transition: opacity .8s ease; }
+.fading > * { opacity: 0; }
+
+@media (max-width: 520px) {
+  .stage { height: 420px; padding: 12px; }
+  .card { font-size: 12px; }
+  .call { font-size: 11px; }
+}
+</style>
+</head>
+<body>
+<figure>
+  <div class="stage" id="stage">
+    <div class="card task">
+      <div class="who">user</div>
+      <div class="title" id="title"></div>
+      <div class="collapse" id="problem"><div><pre id="code"></pre></div></div>
+    </div>
+    <div class="feed"><div class="feed-inner" id="feed"></div></div>
+    <div class="deck">
+      <div class="track" id="track"></div>
+    </div>
+  </div>
+</figure>
+<script>
+// One stored base-model rollout (runs/train250, django__django-16485), cut down to one line per part of each turn.
+const TRAJ = {
+ "id": "django__django-16485",
+ "problem": "floatformat() crashes on \"0.00\".\nDescription\n\nfrom decimal import Decimal\nfrom django.template.defaultfilters import floatformat\nfloatformat('0.00', 0)\nfloatformat(Decimal('0.00'), 0)\nBoth throw ValueError: valid range for prec is [1, MAX_PREC]",
+ "hintTurn": 38,
+ "turns": [
+  [
+   "Let me start by understanding the issue. The PR description mentions that `floatformat()` crashes\u2026",
+   "bash",
+   "find /testbed -type f -name \"*.py\" | head -20",
+   "/testbed/django/__init__.py"
+  ],
+  [
+   "Let me search for the floatformat function.",
+   "bash",
+   "find /testbed -type f -name \"*.py\" | xargs grep -l \"floatformat\" 2>/d\u2026",
+   "/testbed/django/contrib/humanize/templatetags/humanize.py"
+  ],
+  [
+   "Let me look at the defaultfilters.py file since that's where the `floatformat` function is locate\u2026",
+   "bash",
+   "cat /testbed/django/template/defaultfilters.py",
+   "The output of your last command was too long."
+  ],
+  [
+   "Let me look at the floatformat function more specifically by extracting the relevant portion.",
+   "bash",
+   "sed -n '100,180p' /testbed/django/template/defaultfilters.py",
+   "If called without an argument, display the floating point num\u2026"
+  ],
+  [
+   "Let me see the rest of the floatformat function to understand how rounding is done.",
+   "bash",
+   "sed -n '180,220p' /testbed/django/template/defaultfilters.py",
+   "exp = Decimal(1).scaleb(-abs(p))"
+  ],
+  [
+   "Now I understand the issue. Looking at the code:",
+   "bash",
+   "cd /testbed && python3 -c \"from decimal import Decimal, ROUND_HALF_UP\u2026",
+   "0"
+  ],
+  [
+   "Interesting, that worked. Let me try the original failing cases.",
+   "bash",
+   "cd /testbed && python3 -c \"",
+   "Traceback (most recent call last):"
+  ],
+  [
+   "The error is happening. Let me debug the code to see what's happening with `exp` and `prec` when\u2026",
+   "bash",
+   "cd /testbed && python3 -c \"",
+   "p = 0"
+  ],
+  [
+   "Now I see the problem. Let me understand: 1. `exp = 1` (Decimal(1)) 2.",
+   "bash",
+   "cd /testbed && python3 -c \"",
+   "d = 0.00"
+  ],
+  [
+   "So `m = int(d) - d = 0.00`, and `bool(m) = False` so `not m and p < 0` becomes `True and (0 < 0)`\u2026",
+   "bash",
+   "cd /testbed && python3 -c \"",
+   "Decimal(1).scaleb(-0) = 1"
+  ],
+  [
+   "The `exp` is `Decimal('1')`, but wait... the issue is that when `p = 0`, `exp = 1`, and when we t\u2026",
+   "none",
+   "",
+   "The previous message had a formatting issue."
+  ],
+  [
+   "Let me fix the formatting issue.",
+   "bash",
+   "cd /testbed && python3 -c \"",
+   "quantize(exp) result = 0"
+  ],
+  [
+   "So the issue is clear now! When `prec = 0` (which gets computed in the code), the `quantize` func\u2026",
+   "bash",
+   "cd /testbed && python3 -c \"",
+   "d = 0.00"
+  ],
+  [
+   "I see! Using `int(d) - d == 0` gives us `True` for zero, which would be a better way to check if\u2026",
+   "bash",
+   "cd /testbed && python3 -c \"",
+   "d = 0.00"
+  ],
+  [
+   "I need to fix this. Let me look at the formula and see if there's something fundamental wrong.",
+   "bash",
+   "cd /testbed && python3 -c \"",
+   "m1=bool(Decimal(\"0.00\")) = False"
+  ],
+  [
+   "Now I see the pattern more clearly. When `bool(m) = False` (meaning the number is essentially an\u2026",
+   "bash",
+   "cd /testbed && python3 -c \"",
+   "d=0.00, p=0"
+  ],
+  [
+   "I see some interesting things here: 1. When `m` is truthy (like `m=-0.456` for `123.456`), the cu\u2026",
+   "bash",
+   "cd /testbed && python3 -c \"",
+   "d=0.00, p=0"
+  ],
+  [
+   "OK so I see the issue now: 1. For `d='0.00'`, `bool(m)=False`, so we use `tupl[2]` which is `-2`.",
+   "bash",
+   "cd /testbed && python3 -c \"",
+   "prec=0: quantize(Decimal(1)) failed: valid range for prec is\u2026"
+  ],
+  [
+   "Very interesting! When I pass `ROUND_HALF_UP` and `Context(prec=...)` to `quantize()`, the `prec`\u2026",
+   "bash",
+   "cd /testbed && python3 -c \"",
+   "prec=0: failed: valid range for prec is [1, MAX_PREC]"
+  ],
+  [
+   "OK so the issue is confirmed - `prec` must be >= 1 for the Context.",
+   "bash",
+   "sed -n '165,210p' /testbed/django/template/defaultfilters.py",
+   "try:"
+  ],
+  [
+   "Now I see the full context. The issue is on line 189:",
+   "bash",
+   "cd /testbed && python3 -c \"",
+   "d='0.00'                         tupl=DecimalTuple(sign=0, di\u2026"
+  ],
+  [
+   "I see that `units_final` is negative only for `'0.00'` (and similar tiny values with falsy m).",
+   "bash",
+   "cd /testbed && python3 -c \"",
+   "0.00, p=0: prec=1, result=0"
+  ],
+  [
+   "The fix works. The results look correct: - `0.00` with `p=0` gives `0` (integer representation) -\u2026",
+   "bash",
+   "sed -n '187,192p' /testbed/django/template/defaultfilters.py",
+   "# Avoid conversion to scientific notation by accessing `sign`\u2026"
+  ],
+  [
+   "The `prec` is computed on line 186 (based on my earlier output).",
+   "bash",
+   "grep -n \"prec = abs(p)\" /testbed/django/template/defaultfilters.py",
+   "186:    prec = abs(p) + units + 1"
+  ],
+  [
+   "Now let me apply the fix. I'll change line 186 to ensure prec is at least 1.",
+   "bash",
+   "sed -i 's/    prec = abs(p) + units + 1/    prec = abs(p) + units + 1\u2026",
+   ""
+  ],
+  [
+   "Let me verify the fix was applied correctly:",
+   "bash",
+   "sed -n '184,195p' /testbed/django/template/defaultfilters.py",
+   "units = len(tupl[1])"
+  ],
+  [
+   "The fix is in place. Now let me test it with the original failing cases to make sure it works:",
+   "bash",
+   "cd /testbed && python3 -c \"",
+   "Testing floatformat with 0.00:"
+  ],
+  [
+   "We need to configure Django settings first. Let me do that:",
+   "bash",
+   "cd /testbed && python3 -c \"",
+   "Testing floatformat with 0.00:"
+  ],
+  [
+   "The fix works. Now let me run more edge cases to make sure I haven't broken anything:",
+   "bash",
+   "cd /testbed && python3 -c \"",
+   "More test cases:"
+  ],
+  [
+   "The fix works for all edge cases I've tested.",
+   "bash",
+   "cd /testbed && python -m pytest tests/template_tests/filter_tests/tes\u2026",
+   "/opt/miniconda3/envs/testbed/bin/python: No module named pyte\u2026"
+  ],
+  [
+   "Let me try using Django's test runner:",
+   "bash",
+   "cd /testbed && python -m django test tests.template_tests.filter_test\u2026",
+   "Traceback (most recent call last):"
+  ],
+  [
+   "Let me look for the test settings:",
+   "bash",
+   "find /testbed -name \"settings.py\" -path \"*/tests/*\" 2>/dev/null | hea\u2026",
+   "/testbed/tests/admin_scripts/custom_templates/project_templat\u2026"
+  ],
+  [
+   "Let me look for the test directory structure:",
+   "bash",
+   "ls -la /testbed/tests/ | head -20",
+   "total 149"
+  ],
+  [
+   "Let me look at the django test command properly:",
+   "bash",
+   "cd /testbed && DJANGO_SETTINGS_MODULE=tests.settings python -m django\u2026",
+   "Traceback (most recent call last):"
+  ],
+  [
+   "Let me add the tests directory to the Python path:",
+   "bash",
+   "cd /testbed && PYTHONPATH=/testbed/tests DJANGO_SETTINGS_MODULE=setti\u2026",
+   "Traceback (most recent call last):"
+  ],
+  [
+   "Let me look for how the tests are run:",
+   "bash",
+   "cat /testbed/tests/template_tests/filter_tests/test_floatformat.py |\u2026",
+   "from decimal import Decimal, localcontext"
+  ],
+  [
+   "Let me look at the utility setup:",
+   "bash",
+   "cat /testbed/tests/template_tests/utils.py",
+   "import os"
+  ],
+  [
+   "Let me try running the tests through pytest, which should find the tests and run them:",
+   "bash",
+   "pip install pytest pytest-django -q && cd /testbed && python -m pytes\u2026",
+   "============================= test session starts ===========\u2026"
+  ],
+  [
+   "I need to set up Django settings for the tests.",
+   "bash",
+   "cd /testbed && find . -name \"settings.py\" -path \"*/not/*\" 2>/dev/null",
+   ""
+  ],
+  [
+   "Let me look for the not_set settings:",
+   "bash",
+   "cd /testbed && ls -la tests/ | grep -i set",
+   "drwxrwxrwx 1 root root    91 Aug 13 01:43 inline_formsets"
+  ],
+  [
+   "Let me check if there's a test_runner or tox configuration:",
+   "bash",
+   "cd /testbed && cat pyproject.toml 2>/dev/null | head -50",
+   "[build-system]"
+  ],
+  [
+   "Let me look for a manage.py file or runtests.py:",
+   "bash",
+   "cd /testbed && ls -la | grep -E \"manage|run\"",
+   "-rw-r--r-- 1 root root   369 Aug 13 01:43 Gruntfile.js"
+  ],
+  [
+   "Let me check if there's a tox.ini:",
+   "bash",
+   "cd /testbed && cat tox.ini 2>/dev/null | head -20",
+   "# Tox (https://tox.readthedocs.io/) is a tool for running tes\u2026"
+  ],
+  [
+   "Let me check if there's a django-settings test module:",
+   "bash",
+   "cd /testbed && find . -name \"*.py\" -path \"*/tests/*\" -exec grep -l \"D\u2026",
+   "./tests/admin_scripts/tests.py"
+  ],
+  [
+   "Let me look at the runtests.py:",
+   "bash",
+   "cat /testbed/tests/runtests.py",
+   "The output of your last command was too long."
+  ],
+  [
+   "I see. The test settings is `test_sqlite`. Let me run the tests using the tests/runtests.py script:",
+   "bash",
+   "cd /testbed/tests && python runtests.py template_tests.filter_tests.t\u2026",
+   "Testing against Django installed in '/testbed/django' with up\u2026"
+  ],
+  [
+   "All 10 tests pass. Now let me also create a simple script to verify exactly the issue from the PR\u2026",
+   "bash",
+   "cd /testbed && python3 -c \"",
+   "Traceback (most recent call last):"
+  ],
+  [
+   "Need to import django first.",
+   "bash",
+   "cd /testbed && python3 -c \"",
+   "Testing the issue from the PR description:"
+  ],
+  [
+   "The fix works. Let me also check if there's any test for the \"test_zero_values\" that the test run\u2026",
+   "bash",
+   "grep -A 30 \"def test_zero_values\" /testbed/tests/template_tests/filte\u2026",
+   "def test_zero_values(self):"
+  ],
+  [
+   "The existing tests don't test `floatformat('0.00', 0)` specifically.",
+   "bash",
+   "cd /testbed && python3 -c \"",
+   "Additional edge case tests:"
+  ],
+  [
+   "All edge cases pass. Let me also run a more comprehensive test to make sure the fix doesn't break\u2026",
+   "bash",
+   "cd /testbed && python3 -c \"",
+   "Comprehensive test:"
+  ],
+  [
+   "Hmm, there's a discrepancy in my expected values for negative p arguments.",
+   "bash",
+   "cd /testbed && python3 -c \"",
+   "Let me check the full range of behavior:"
+  ],
+  [
+   "Hmm, I see some interesting differences here for negative values.",
+   "bash",
+   "cd /testbed/tests && python runtests.py template_tests.filter_tests.t\u2026",
+   "Testing against Django installed in '/testbed/django' with up\u2026"
+  ],
+  [
+   "All existing tests pass. The fix works correctly and doesn't introduce regressions.",
+   "bash",
+   "cd /testbed/tests && grep -r \"floatformat\" --include=\"*.py\" | head -20",
+   "template_tests/filter_tests/test_floatformat.py:from django.t\u2026"
+  ],
+  [
+   "It seems like `floatformat` is only tested in `test_floatformat.py`.",
+   "bash",
+   "cd /testbed/tests && grep -r \"floatformat\" --include=\"*.py\" | grep -v\u2026",
+   "i18n/tests.py:                    \"66666,67\", Template(\"{{ n|\u2026"
+  ],
+  [
+   "Let me run the i18n tests that use floatformat:",
+   "bash",
+   "cd /testbed/tests && python runtests.py i18n.tests -k floatformat -v\u2026",
+   "Testing against Django installed in '/testbed/django' with up\u2026"
+  ],
+  [
+   "Let me check what tests are in i18n/tests.py related to floatformat:",
+   "bash",
+   "cd /testbed/tests && grep -B5 -A10 \"floatformat\" i18n/tests.py | head\u2026",
+   "self.assertEqual("
+  ],
+  [
+   "Let me find the actual test method name:",
+   "bash",
+   "cd /testbed/tests && grep -B30 \"floatformat:2\" i18n/tests.py | grep \"\u2026",
+   ""
+  ],
+  [
+   "Let me try a different approach:",
+   "bash",
+   "cd /testbed/tests && grep -B50 \"floatformat\" i18n/tests.py | grep -E\u2026",
+   ""
+  ],
+  [
+   "Let me try a different search:",
+   "bash",
+   "cd /testbed/tests && head -200 i18n/tests.py | grep -n \"def test\"",
+   "91:    def test_plural(self):"
+  ],
+  [
+   "Let me search more thoroughly:",
+   "bash",
+   "cd /testbed/tests && grep -n \"floatformat\" i18n/tests.py",
+   "744:                    \"66666,67\", Template(\"{{ n|floatforma\u2026"
+  ],
+  [
+   "Let me look at the test function at line 744:",
+   "bash",
+   "cd /testbed/tests && sed -n '700,760p' i18n/tests.py",
+   "with self.settings(USE_THOUSAND_SEPARATOR=True):"
+  ],
+  [
+   "Let me find the test method name:",
+   "bash",
+   "cd /testbed/tests && sed -n '660,690p' i18n/tests.py",
+   "self.assertEqual(\"\\xa0\", get_format(\"THOUSAND_SEPARATOR\"))"
+  ],
+  [
+   "I see, the test is in `test_l10n_enabled`. Let me run this test:",
+   "bash",
+   "cd /testbed/tests && python runtests.py i18n.tests.FloatingPointNumbe\u2026",
+   "Testing against Django installed in '/testbed/django' with up\u2026"
+  ],
+  [
+   "Let me find the right test class name:",
+   "bash",
+   "cd /testbed/tests && grep -n \"class.*Float\" i18n/tests.py",
+   ""
+  ],
+  [
+   "Let me search more broadly:",
+   "bash",
+   "cd /testbed/tests && grep -n \"class.*:\" i18n/tests.py | head -20",
+   "71:class AppModuleStub:"
+  ],
+  [
+   "The test is in `FormattingTests`. Let me run it:",
+   "bash",
+   "cd /testbed/tests && python runtests.py i18n.tests.FormattingTests.te\u2026",
+   "Testing against Django installed in '/testbed/django' with up\u2026"
+  ],
+  [
+   "All the tests pass. Let me run all the i18n tests to be sure:",
+   "bash",
+   "cd /testbed/tests && python runtests.py i18n.tests -v 2 2>&1 | tail -\u2026",
+   "The active locale's formats take precedence over the default\u2026"
+  ],
+  [
+   "All 93 i18n tests pass. The fix is working correctly and doesn't break any existing functionality.",
+   "bash",
+   "cd /testbed && python3 -c \"",
+   "Testing the exact issue from the PR description:"
+  ],
+  [
+   "The fix works correctly. Let me summarize what I did:",
+   "bash",
+   "ls -la /testbed/*.py 2>/dev/null",
+   "-rw-r--r-- 1 root root 1633 Aug 13 01:43 /testbed/setup.py"
+  ],
+  [
+   "Good, there are no extra test files to clean up.",
+   "bash",
+   "cd /testbed && git diff",
+   "diff --git a/django/template/defaultfilters.py b/django/templ\u2026"
+  ],
+  [
+   "The change is minimal and focused. Let me verify once more that all tests still pass and then sub\u2026",
+   "bash",
+   "cd /testbed/tests && python runtests.py template_tests.filter_tests.t\u2026",
+   "Testing against Django installed in '/testbed/django' with up\u2026"
+  ],
+  [
+   "All tests pass. The fix is complete and working.",
+   "task_complete",
+   "",
+   "Task submitted."
+  ]
+ ]
+};
+</script>
+<script>
+const SCALE = 80;  // turns the track spans (this rollout ends at 73)
+const LIMIT = 40;
+const MAX_CARDS = 12;
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
+
+const [titleLine, ...rest] = TRAJ.problem.split("\n");
+const codeLines = rest.filter(l => l.trim() && l.trim() !== "Description");
+const turns = TRAJ.turns;
+const pct = t => `${(t - 1) / SCALE * 100}%`;
+
+async function typeInto(node, text, cps) {
+  for (let i = 1; i <= text.length; i += 2) {
+    node.textContent = text.slice(0, i);
+    await sleep(2000 / cps);
+  }
+  node.textContent = text;
+}
+
+function buildTrack() {
+  const track = $("track");
+  track.replaceChildren();
+  const tick = el("div", "tick"); tick.style.left = pct(LIMIT + 1); track.append(tick);
+  for (const [t, text] of [[1, "1"], [LIMIT + 1, String(LIMIT)]]) {
+    const l = el("div", "label", text); l.style.left = pct(t); track.append(l);
+  }
+  const counter = el("div", "counter"); counter.id = "counter"; track.append(counter);
+}
+
+function addSliver(t, last) {
+  const s = el("div", "sliver" + (last ? " submit" : ""));
+  s.style.left = pct(t);
+  s.style.width = `calc(${100 / SCALE}% - 2px)`;
+  $("track").append(s);
+  requestAnimationFrame(() => s.classList.add("in"));
+  const c = $("counter");
+  c.textContent = last ? `turn ${t} · submitted` : `turn ${t}`;
+}
+
+function makeCard(t) {
+  const [thought, tool, cmd, out] = turns[t - 1];
+  const slot = el("div", "slot"), inner = el("div"), card = el("div", "card");
+  const body = el("div", "body");
+  const th = el("div", "thought"), call = el("div", "call"), o = el("div", "out");
+  const chip = tool === "none" ? el("span", "tool bad", "⚠ no valid tool call")
+             : el("span", "tool" + (tool === "task_complete" ? " submit" : ""), tool);
+  const code = el("span");
+  call.append(chip, code);
+  body.append(th, call, o);
+  card.append(el("div", "tn", String(t)), body);
+  inner.append(card); slot.append(inner);
+  $("feed").append(slot);
+  while ($("feed").children.length > MAX_CARDS) $("feed").firstChild.remove();
+  requestAnimationFrame(() => requestAnimationFrame(() => slot.classList.add("open")));
+  return { th, code, o, thought, cmd, out };
+}
+
+async function turn(t, typed) {
+  const c = makeCard(t);
+  if (typed) {
+    await sleep(250);
+    await typeInto(c.th, c.thought, 130);
+    await sleep(120);
+    await typeInto(c.code, c.cmd, 170);
+    await sleep(200);
+  } else {
+    c.th.textContent = c.thought; c.code.textContent = c.cmd;
+  }
+  c.o.textContent = c.out;
+  c.o.classList.add("show");
+  addSliver(t, t === turns.length);
+}
+
+// Time between untyped turns: slows down early, speeds through the middle, lands on the last one
+function gap(t) {
+  const n = turns.length;
+  if (t >= n - 3) return 380;
+  if (t <= 14) return 650 - (t - 4) * 52;
+  return 85;
+}
+
+function reset() {
+  const stage = $("stage");
+  stage.classList.remove("frozen", "fading");
+  $("feed").replaceChildren();
+  $("title").textContent = "";
+  $("code").textContent = "";
+  $("problem").classList.remove("shut");
+  buildTrack();
+}
+
+async function play() {
+  reset();
+  await sleep(500);
+  await typeInto($("title"), titleLine, 60);
+  for (const line of codeLines) { $("code").textContent += ($("code").textContent ? "\n" : "") + line; await sleep(140); }
+  await sleep(900);
+  $("problem").classList.add("shut");
+  await sleep(300);
+  for (let t = 1; t <= 3; t++) { await turn(t, true); await sleep(450); }
+  for (let t = 4; t <= turns.length; t++) { await turn(t, false); await sleep(gap(t)); }
+  await sleep(1200);
+  $("stage").classList.add("frozen");
+  await sleep(3200);
+  $("stage").classList.add("fading");
+  await sleep(1000);
+}
+
+function still() {  // reduced motion: the end state, no animation
+  reset();
+  $("title").textContent = titleLine;
+  $("problem").classList.add("shut");
+  for (let t = turns.length - MAX_CARDS + 1; t <= turns.length; t++) {
+    const c = makeCard(t); c.th.textContent = c.thought; c.code.textContent = c.cmd;
+    c.o.textContent = c.out; c.o.classList.add("show");
+  }
+  for (let t = 1; t <= turns.length; t++) addSliver(t, t === turns.length);
+  $("stage").classList.add("frozen");
+}
+
+if (reduced) still();
+else (async () => { for (;;) await play(); })();
+</script>
+</body>
+</html>
