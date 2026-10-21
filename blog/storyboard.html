@@ -31,7 +31,7 @@ svg text { font-family: var(--mono); }
 <body>
 <main>
   <h1>Headline figure: storyboard</h1>
-  <p class="note">Static frames, before any animation. The captions are notes for us, not part of the figure.</p>
+  <p class="note">Static frames of the headline figure (animated in fig1.html). The captions are notes for us, not part of the figure.</p>
   <div id="frames"></div>
 </main>
 <script>
@@ -159,7 +159,7 @@ function targetRow(svg, { focus = null, scored = 0 } = {}) {
   let x = TOK_X;
   TOKENS.forEach((t, i) => {
     const w = Math.max(t.trim().length * 8 + 16, 32);
-    const done = i < scored, dim = focus !== null && i > focus && !done;
+    const done = i === focus && i < scored, dim = focus !== null && i !== focus;  // only the token in focus shows its score
     svg.append(s("rect", { x, y: ROW_Y, width: w, height: CELL_H, rx: 4,
       fill: done ? mix(kl(NEXT[i])) : css("fixed"), stroke: i === focus ? css("ink") : css("turn"),
       "stroke-width": i === focus ? 1.5 : 1, opacity: dim ? .35 : 1 }));
@@ -229,15 +229,35 @@ frame("4.4", "Now swap in the teacher's context: the same rollout plus the hint.
 frame("4.5", "Compare the two (KL): nearly the same, so green.", 600, 190, svg => step4(svg, { focus: 0, show: ["teacher", "student"], scored: 1 }));
 frame("4.6", "Next token, same thing. (The tokens before it are now part of both contexts.)", 600, 190, svg => step4(svg, { focus: 1, show: ["teacher", "student"], scored: 2 }));
 frame("4.7", "Here the hint matters: the teacher would rather submit or wrap up, the student goes on. Red.", 600, 190, svg => step4(svg, { focus: 2, show: ["teacher", "student"], scored: 3 }));
-frame("4.8", "Every target token gets a score. Training lowers them, pulling the student toward the teacher.", 600, 120, svg => step4(svg, { scored: TOKENS.length }));
+// A made-up per-token loss for the frames that show many tokens: high at the start of turns, where the
+// model decides what to do next, now and then where it keeps exploring, near zero elsewhere
+function streamKL(n) {
+  const r = Math.abs(Math.sin(n * 12.9898 + 7) * 43758.5453) % 1, k = n % 26;
+  if (k < 2) return r ** 1.5 * (1.3 - k * .5);
+  return r > .985 ? r * .5 : r ** 8 * .08;
+}
+const lossH = k => 1.5 + Math.min(k / 1.5, 1) * 34;
 
-heading("Then");
+frame("4.8", "Each token's score is its loss, and goes into a strip at the bottom. Then speed through every token of every fixed turn: the losses pile up on the left.", 600, 180, svg => {
+  const cells = targetRow(svg, {});
+  const base = 170;
+  T(svg, 0, base - 4, "loss");
+  svg.append(s("line", { x1: 56, x2: 600, y1: base, y2: base, stroke: css("line") }));
+  cells.forEach((cell, i) => svg.append(s("rect", { x: cell.c - 4, y: base - lossH(kl(NEXT[i])), width: 8, height: lossH(kl(NEXT[i])), rx: 1.5, fill: css("faint") })));
+  for (let n = 0; n < 120; n++) {
+    const x = 60 + n * 1.5;
+    svg.append(s("line", { x1: x, x2: x, y1: base, y2: base - lossH(n < TOKENS.length ? kl(NEXT[n]) : streamKL(n)), stroke: css("muted"), "stroke-width": .8 }));
+  }
+});
 
-frame(7, "The payoff: the trained model, given no hint, wraps up and submits sooner.", 600, 100, svg => {
-  row(svg, 8);
-  T(svg, 0, 28, "before");
-  row(svg, 58, { end: 10, submitLast: true });
-  T(svg, 0, 78, "after training");
+frame("4.9", "The training signal: the losses move to the center and spread across the frame. One loss per target token, across all the fixed turns; near zero where the hint changes nothing.", 600, 120, svg => {
+  const base = 90, N = 200;
+  svg.append(s("line", { x1: 60, x2: 590, y1: base, y2: base, stroke: css("line") }));
+  for (let n = 0; n < N; n++) {
+    const x = 60 + (n + .5) * 530 / N;
+    svg.append(s("line", { x1: x, x2: x, y1: base, y2: base - lossH(n < TOKENS.length ? kl(NEXT[n]) : streamKL(n)) * 1.8, stroke: css("muted"), "stroke-width": 2 }));
+  }
+  T(svg, 60, base + 18, "the training signal: one loss for every target token, across all the fixed turns", { "font-size": 10 });
 });
 </script>
 </body>

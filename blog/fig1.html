@@ -19,8 +19,6 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); }
 figure { margin: 32px auto 48px; max-width: 680px; padding: 0 16px; }
-figcaption { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
-figcaption b { color: var(--ink); }
 svg { width: 100%; height: auto; display: block; overflow: visible; }
 svg text { font-family: var(--mono); }
 /* Everything moves or fades once per beat */
@@ -33,12 +31,8 @@ svg * { transition: transform .6s ease, opacity .5s ease, fill .4s ease, stroke 
 </head>
 <body>
 <figure>
-  <figcaption><b>A</b> Named tokens, with a smooth curve behind the bars</figcaption>
-  <svg id="figA" viewBox="0 0 600 322" role="img" aria-label="Offline self-distillation, version A"></svg>
-</figure>
-<figure>
-  <figcaption><b>B</b> No token names: denser bars, the token in the rollout marked</figcaption>
-  <svg id="figB" viewBox="0 0 600 322" role="img" aria-label="Offline self-distillation, version B"></svg>
+  <svg id="fig" viewBox="0 0 600 322" role="img"
+       aria-label="Offline self-distillation: a fixed rollout, the same rollout with a hint, and each target token scored by comparing the model's next-token distributions with and without the hint; the per-token losses are the training signal"></svg>
 </figure>
 <script>
 // Illustrative, not real data. A stored turn after the hint and, at each of its tokens, the main
@@ -85,9 +79,9 @@ function distribution(i, slots) {
   return cands.map(c => [c[0], c[1], c[2], c === NEXT[i][0]]).concat(tail);
 }
 
-// ---- One figure; STYLE "a" names the main candidates, "b" shows a denser, unnamed distribution ----
+// ---- The figure ----
 
-function figure(svg, STYLE) {
+function figure(svg) {
   const NS = "http://www.w3.org/2000/svg";
   const css = v => `var(--${v})`;
   // window.FIG_START = "speedup" fast-forwards the first loop to the speed-up, for reviewing the end
@@ -116,7 +110,7 @@ function figure(svg, STYLE) {
   const ACC_X0 = 60, ACC_X1 = 240, N_STREAM = 200, CENTER_Y = 190;  // where the losses pile up during the speed-up, and how many tokens go by
   const TOKENS_PER_TURN = 26;
   const POOL = ["Let", " me", " check", " the", " docs", ".", "bash", "(", "grep", " -r", " floatformat", ")", "Now", " run", " tests", "All", " pass"];
-  const CHART = STYLE === "a" ? { slots: 9, gap: .55, sigma: .9 } : { slots: 30, gap: .35, sigma: 1.6 };
+  const CHART = { slots: 9, gap: .55, sigma: .9 };  // candidates per distribution, gap between bars, KDE width (in slots)
   const CHART_W = 180, CHART_H = 46;
 
   let el = {};
@@ -154,9 +148,9 @@ function figure(svg, STYLE) {
     s("text", { x: 15, y: ROW_B + 28, "font-size": 9.5 }, "same model", el.teacher);
 
     // Target tokens and their loss bars, on a track that scrolls; clipped so it never runs into the labels
-    const clip = s("clipPath", { id: `trackClip${STYLE}` }, null, s("defs"));
+    const clip = s("clipPath", { id: "trackClip" }, null, s("defs"));
     s("rect", { x: ACC_X1 + 8, y: 0, width: 600, height: 320 }, null, clip);
-    const window_ = s("g", { "clip-path": `url(#trackClip${STYLE})` });
+    const window_ = s("g", { "clip-path": "url(#trackClip)" });
     el.track = s("g", {}, null, window_);
     el.nextX = TOK_X;
     TOKENS.forEach(t => addCell(t));
@@ -176,7 +170,7 @@ function figure(svg, STYLE) {
     el.ctx = { student: context("student"), teacher: context("teacher") };
 
     // The training signal: every scored token's loss, packed side by side on the left as the stream goes by
-    el.acc = s("g", { style: `transform-box: view-box; transform-origin: ${ACC_X0}px ${LOSS_Y}px` });
+    el.acc = s("g", { style: `opacity: 0; transform-box: view-box; transform-origin: ${ACC_X0}px ${LOSS_Y}px` });
     s("line", { x1: ACC_X0, x2: ACC_X1, y1: LOSS_Y, y2: LOSS_Y, stroke: css("line"), "vector-effect": "non-scaling-stroke" }, null, el.acc);
     el.accCaption = s("text", { x: ACC_X0, y: CENTER_Y + 18, "font-size": 10, ...hidden }, "the training signal: one loss for every target token, across all the fixed turns");
     el.nAcc = 0;
@@ -241,20 +235,14 @@ function figure(svg, STYLE) {
       s("line", { x1: x0 - slot, x2: x0 + CHART_W + slot * 1.5, y1: base, y2: base, stroke: css("turn") }, null, g);
       parts[who + "Label"] = s("text", { x: x0 - slot - 6, y: base + dir * 12 + 4, "text-anchor": "end", "font-size": 10, fill: css(who), style: "opacity: 0" }, who, g);
     }
-    const tk = d.findIndex(cand => cand[3]), sb = ROW_Y + CELL_H + 12;
-    if (STYLE === "a") {
-      // names under the student's side; the target token in bold
-      d.forEach((cand, k) => {
-        if (!cand[0]) return;
-        const lx = cx(k) + 3, ly = sb + CHART_H + 14;
-        s("text", { x: lx, y: ly, "text-anchor": "end", transform: `rotate(-40 ${lx} ${ly})`, "font-size": 9.5,
-          ...(cand[3] ? { fill: css("ink"), "font-weight": 700 } : {}) }, cand[0].trim(), g);
-      });
-    } else {
-      // no names: just mark the token in the rollout
-      const y = sb + CHART_H + 8;
-      s("path", { d: `M${cx(tk) - 4},${y + 6} L${cx(tk) + 4},${y + 6} L${cx(tk)},${y} Z`, fill: css("ink") }, null, g);
-    }
+    // names under the student's side; the target token in bold
+    const sb = ROW_Y + CELL_H + 12;
+    d.forEach((cand, k) => {
+      if (!cand[0]) return;
+      const lx = cx(k) + 3, ly = sb + CHART_H + 14;
+      s("text", { x: lx, y: ly, "text-anchor": "end", transform: `rotate(-40 ${lx} ${ly})`, "font-size": 9.5,
+        ...(cand[3] ? { fill: css("ink"), "font-weight": 700 } : {}) }, cand[0].trim(), g);
+    });
     return { g, parts };
   }
   async function grow(ch, who) {
@@ -392,6 +380,7 @@ function figure(svg, STYLE) {
     if (skipping) { skipping = false; svg.classList.remove("skip"); await sleep(300); }
     show(el.more, false);
     svg.classList.add("fast");
+    show(el.acc);
     el.cells.forEach(absorb);
     for (let n = 0; n < N_STREAM - TOKENS.length; n++) {
       const [t, k] = n < MORE.length ? MORE[n] : [POOL[n % POOL.length], spikeKL(Math.floor(n / TOKENS_PER_TURN), n % TOKENS_PER_TURN, n)];
@@ -436,8 +425,7 @@ function figure(svg, STYLE) {
   else (async () => { for (;;) await play(); })();
 }
 
-figure(document.getElementById("figA"), "a");
-figure(document.getElementById("figB"), "b");
+figure(document.getElementById("fig"));
 </script>
 </body>
 </html>
