@@ -27,17 +27,18 @@ svg text { font-family: var(--mono); }
 svg * { transition: transform .6s ease, opacity .5s ease, fill .4s ease, stroke .3s ease; }
 .grow { transform-box: fill-box; transform-origin: center bottom; }
 .grow.down { transform-origin: center top; }
-.fast * { transition-duration: .15s; }
+.fast * { transition-duration: .08s; }
+.skip * { transition: none !important; }
 </style>
 </head>
 <body>
 <figure>
   <figcaption><b>A</b> Named tokens, with a smooth curve behind the bars</figcaption>
-  <svg id="figA" viewBox="0 0 600 310" role="img" aria-label="Offline self-distillation, version A"></svg>
+  <svg id="figA" viewBox="0 0 600 322" role="img" aria-label="Offline self-distillation, version A"></svg>
 </figure>
 <figure>
   <figcaption><b>B</b> No token names: denser bars, the token in the rollout marked</figcaption>
-  <svg id="figB" viewBox="0 0 600 310" role="img" aria-label="Offline self-distillation, version B"></svg>
+  <svg id="figB" viewBox="0 0 600 322" role="img" aria-label="Offline self-distillation, version B"></svg>
 </figure>
 <script>
 // Illustrative, not real data. A stored turn after the hint and, at each of its tokens, the main
@@ -59,6 +60,8 @@ const MORE = [
   ["bash", .01], ["(", 0], ["cd", .02], [" tests", .01], [" &&", 0], [" python", .01], [" runtests", .03], [".py", 0], [")", 0],
   ["Ran", .02], [" 93", .01], [" tests", 0], [".", .05], ["All", .4], [" pass", .1], [".", .03], [" Let", .2], [" me", .01],
   [" check", .9], [" the", .05], [" docs", .6], [" too", .3], [".", .04], ["bash", .01], ["(", 0], ["grep", .05], [" -r", .02],
+  [" floatformat", 0], [" docs", .01], [")", 0], ["No", .1], [" changes", .05], [" needed", .2], [".", .02], [" Now", .7], [" let", .1],
+  [" me", .01], [" look", .8], [" at", .02], [" the", .01], [" humanize", .4], [" module", .02], [".", .01], ["bash", .01], ["(", 0],
 ];
 const HINT = "You're taking too long. Wrap up.";
 
@@ -87,8 +90,10 @@ function distribution(i, slots) {
 function figure(svg, STYLE) {
   const NS = "http://www.w3.org/2000/svg";
   const css = v => `var(--${v})`;
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  // window.FIG_START = "speedup" fast-forwards the first loop to the speed-up, for reviewing the end
+  let skipping = window.FIG_START === "speedup";
+  const sleep = ms => skipping ? Promise.resolve() : new Promise(r => setTimeout(r, ms));
+  const frame = () => skipping ? Promise.resolve() : new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
   function s(tag, attrs = {}, text, parent = svg) {
     const e = document.createElementNS(NS, tag);
     if (tag === "text") attrs = { fill: css("muted"), "font-size": 11, ...attrs };  // defaults as attributes, so each text can override them
@@ -108,7 +113,9 @@ function figure(svg, STYLE) {
   const ROW_Y = 118, CELL_H = 24, TOK_X = 250;  // the target tokens
   const LOSS_Y = 298, LOSS_H = 34;  // the per-token loss strip: bars stand on this line
   const VIEW_RIGHT = 540;  // the focused token stays left of this as the row scrolls
-  const MEAN_X = 230;  // where the losses gather at the end
+  const ACC_X0 = 60, ACC_X1 = 240, N_STREAM = 200;  // where the losses pile up during the speed-up, and how many tokens go by
+  const TOKENS_PER_TURN = 26;
+  const POOL = ["Let", " me", " check", " the", " docs", ".", "bash", "(", "grep", " -r", " floatformat", ")", "Now", " run", " tests", "All", " pass"];
   const CHART = STYLE === "a" ? { slots: 9, gap: .55, sigma: .9 } : { slots: 30, gap: .35, sigma: 1.6 };
   const CHART_W = 180, CHART_H = 46;
 
@@ -148,7 +155,7 @@ function figure(svg, STYLE) {
 
     // Target tokens and their loss bars, on a track that scrolls; clipped so it never runs into the labels
     const clip = s("clipPath", { id: `trackClip${STYLE}` }, null, s("defs"));
-    s("rect", { x: 56, y: 0, width: 560, height: 320 }, null, clip);
+    s("rect", { x: ACC_X1 + 8, y: 0, width: 600, height: 320 }, null, clip);
     const window_ = s("g", { "clip-path": `url(#trackClip${STYLE})` });
     el.track = s("g", {}, null, window_);
     el.nextX = TOK_X;
@@ -168,11 +175,18 @@ function figure(svg, STYLE) {
     // Each model's context, laid right before the target tokens
     el.ctx = { student: context("student"), teacher: context("teacher") };
 
-    // The end: the per-token losses average into one number, the training signal
-    el.mean = s("g", hidden);
-    el.meanBar = s("rect", { class: "grow", x: MEAN_X - 14, y: LOSS_Y - LOSS_H, width: 28, height: LOSS_H, rx: 2, fill: css("ink"), style: "transform: scaleY(0)" }, null, el.mean);
-    el.meanText = s("text", { x: MEAN_X + 24, y: LOSS_Y - 18, fill: css("ink"), "font-size": 12 }, "", el.mean);
-    s("text", { x: MEAN_X + 24, y: LOSS_Y - 4, "font-size": 10 }, "mean over every target token: the training signal", el.mean);
+    // The training signal: every scored token's loss, packed side by side on the left as the stream goes by
+    el.acc = s("g", { style: `transform-box: view-box; transform-origin: ${ACC_X0}px ${LOSS_Y}px` });
+    el.accCaption = s("text", { x: ACC_X0, y: LOSS_Y + 16, "font-size": 10, ...hidden }, "the training signal: one loss for every target token, across all the fixed turns");
+    el.nAcc = 0;
+  }
+
+  // A made-up per-token KL for the stream after MORE: high at the start of turns, where the model decides
+  // what to do next, and now and then where it keeps exploring; near zero everywhere else.
+  function spikeKL(t, k, n) {
+    const r = Math.abs(Math.sin(n * 12.9898 + t * 78.233) * 43758.5453) % 1;
+    if (k < 2) return r ** 1.5 * (1.3 - k * .5);
+    return r > .985 ? r * .5 : r ** 8 * .08;
   }
 
   function addCell(t, k = null) {
@@ -277,10 +291,19 @@ function figure(svg, STYLE) {
     cell.k = k;
   }
 
+  // A scored token's loss joins the pile on the left: one thin line per token, in order
+  function absorb(cell) {
+    if (cell.absorbed || cell.k == null) return;
+    cell.absorbed = true;
+    const x = ACC_X0 + el.nAcc++ * (ACC_X1 - ACC_X0) / N_STREAM, h = 1.5 + Math.min(cell.k / 1.5, 1) * LOSS_H;
+    s("line", { x1: x, x2: x, y1: LOSS_Y, y2: LOSS_Y - h, stroke: css("loss"), "stroke-width": .8 }, null, el.acc);
+  }
+
   // ---- The loop ----
 
   async function play() {
     build();
+    if (skipping) svg.classList.add("skip");
     await frame();
 
     // 1. The rollout: a finished sequence of turns
@@ -363,41 +386,37 @@ function figure(svg, STYLE) {
       await sleep(380);
     }
 
-    // ...and on through every token of every fixed turn, faster
+    // ...and on through every token of every fixed turn, faster and faster. The stream blurs, and
+    // each token's loss piles up on the left as it goes by.
+    if (skipping) { skipping = false; svg.classList.remove("skip"); await sleep(300); }
     show(el.more, false);
     svg.classList.add("fast");
-    for (const [t, k] of MORE) {
+    el.cells.forEach(absorb);
+    for (let n = 0; n < N_STREAM - TOKENS.length; n++) {
+      const [t, k] = n < MORE.length ? MORE[n] : [POOL[n % POOL.length], spikeKL(Math.floor(n / TOKENS_PER_TURN), n % TOKENS_PER_TURN, n)];
       const cell = addCell(t, k);
       show(cell.g);
       focusOn(el.cells.length - 1);
-      await sleep(90);
       score(el.cells.length - 1, k, { number: false });
-      await sleep(70);
+      absorb(cell);
+      const wait = Math.max(8, 70 - n * 1.2);
+      el.track.style.filter = wait < 30 ? `blur(${(30 - wait) / 12}px)` : "";  // a blur as it speeds up
+      if (el.cells.length > 40) el.cells.shift().g.remove();  // tokens long gone off the left
+      await sleep(wait);
     }
     svg.classList.remove("fast");
+    el.track.style.filter = "";
     focusOn(null);
-    await sleep(900);
+    await sleep(300);
 
-    // The losses average into one number: the training signal
-    const ks = el.cells.map(c => c.k);
-    const mean = ks.reduce((a, b) => a + b, 0) / ks.length;
-    el.cells.forEach(c => show(c.g, false));
-    await sleep(400);
-    el.cells.forEach(c => {  // every token's loss bar slides into one place...
-      c.bar.style.transition = "transform .9s ease, opacity .9s ease";
-      c.bar.style.transform = `translate(${MEAN_X - el.offset - c.c}px, 0)`;
-      c.bar.style.opacity = 0;
-    });
-    await sleep(800);
-    show(el.track, false);
-    el.meanText.textContent = `loss = ${mean.toFixed(2)}`;
-    el.meanBar.setAttribute("height", 1.5 + Math.min(mean / 1.5, 1) * LOSS_H);
-    el.meanBar.setAttribute("y", LOSS_Y - (1.5 + Math.min(mean / 1.5, 1) * LOSS_H));
-    show(el.mean);
-    await frame();
-    el.meanBar.style.transform = "scaleY(1)";
-    await sleep(3200);
-    [el.mean, el.lblLoss, el.lossLine].forEach(e => show(e, false));
+    // Pull back: the losses of every target token, spread across the frame
+    [el.track, el.lblLoss].forEach(e => show(e, false));
+    await sleep(500);
+    el.acc.style.transition = "transform 1.2s ease";
+    el.acc.style.transform = `scale(${(590 - ACC_X0) / (ACC_X1 - ACC_X0)}, 1.6)`;
+    show(el.accCaption);
+    await sleep(5000);
+    [el.acc, el.accCaption, el.lossLine].forEach(e => show(e, false));
     await sleep(900);
   }
 
