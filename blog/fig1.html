@@ -11,63 +11,46 @@
   --ink: #1a1a19;
   --muted: #6b6a66;
   --faint: #a3a29d;
-  --line: #e6e5e1;
+  --line: #dddcd7;
   --accent: #2a78d6;
   --accent-soft: #e8f0fb;
   --warn: #b5651d;
-  --frozen: #c9c8c3;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --sans: ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #161615; --surface: #1f1f1e; --ink: #ecebe8; --muted: #a09f9a; --faint: #6b6a66;
-    --line: #2e2e2c; --accent: #5b9be6; --accent-soft: #1d2a3b; --warn: #d9904a; --frozen: #4a4a47;
+    --line: #34342f; --accent: #5b9be6; --accent-soft: #1d2a3b; --warn: #d9904a;
   }
 }
 :root[data-theme="dark"] {
   --bg: #161615; --surface: #1f1f1e; --ink: #ecebe8; --muted: #a09f9a; --faint: #6b6a66;
-  --line: #2e2e2c; --accent: #5b9be6; --accent-soft: #1d2a3b; --warn: #d9904a; --frozen: #4a4a47;
+  --line: #34342f; --accent: #5b9be6; --accent-soft: #1d2a3b; --warn: #d9904a;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); }
 figure { margin: 40px auto; max-width: 760px; padding: 0 16px; }
 
-.stage {
-  height: 460px; display: flex; flex-direction: column; gap: 14px;
-  padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg);
-}
-
-/* Cards */
+/* Every card has the same height, so the cards behind the front one show as evenly spaced edges */
+.stage { --h: 112px; --step: 2.5px; height: 340px; max-width: 600px; margin: 0 auto; position: relative; transition: opacity .6s ease, filter 1s ease; }
+.stage.frozen { filter: grayscale(1); opacity: .55; }
+.stage.fading { opacity: 0; }
 .card {
+  position: absolute; left: 0; right: 0; bottom: 0; height: var(--h);
   background: var(--surface); border: 1px solid var(--line); border-radius: 7px;
-  padding: 9px 12px; font-size: 13px; line-height: 1.45;
-  transition: filter 1.2s ease, opacity 1.2s ease, border-color 1.2s ease;
+  padding: 9px 12px; font-size: 13px; line-height: 1.45; overflow: hidden;
+  transition: transform .28s ease, box-shadow .28s ease;
 }
-.task { border-left: 3px solid var(--ink); flex: none; }
-.task .who { font: 11px var(--mono); color: var(--muted); margin-bottom: 2px; }
-.task .title { font-weight: 600; min-height: 1.45em; }
-.task pre {
-  margin: 0; font: 11.5px/1.5 var(--mono); color: var(--muted); white-space: pre-wrap;
+.card.front { box-shadow: 0 6px 18px -10px rgb(0 0 0 / .25); }
+.card.user { border-top: 2px solid var(--ink); }
+.head { font: 11px var(--mono); color: var(--faint); margin-bottom: 2px; }
+.title { font-weight: 600; min-height: 1.45em; }
+.user pre { margin: 0; font: 11.5px/1.5 var(--mono); color: var(--muted); white-space: pre-wrap; }
+.thought {
+  color: var(--muted); min-height: 1.45em;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-.collapse { display: grid; grid-template-rows: 1fr; transition: grid-template-rows .5s ease, opacity .5s ease; }
-.collapse > * { overflow: hidden; min-height: 0; }
-.collapse.shut { grid-template-rows: 0fr; opacity: 0; }
-
-/* The turns, newest at the bottom; older ones scroll up and fade out */
-.feed {
-  flex: 1; position: relative; overflow: hidden;
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 38%);
-          mask-image: linear-gradient(to bottom, transparent 0, #000 38%);
-}
-.feed-inner { position: absolute; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; }
-.slot { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .3s ease, opacity .3s ease; }
-.slot.open { grid-template-rows: 1fr; opacity: 1; }
-.slot > div { overflow: hidden; min-height: 0; }
-.slot .card { margin-top: 7px; display: flex; gap: 11px; }
-.tn { font: 11px/1.9 var(--mono); color: var(--faint); width: 20px; text-align: right; flex: none; }
-.body { min-width: 0; flex: 1; }
-.thought { color: var(--muted); min-height: 1.45em; }
 .call { font: 12px/1.5 var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.5em; }
 .tool {
   display: inline-block; font: 10.5px/1.6 var(--mono); padding: 0 5px; margin-right: 6px;
@@ -75,36 +58,11 @@ figure { margin: 40px auto; max-width: 760px; padding: 0 16px; }
 }
 .tool.submit { background: var(--accent); color: var(--surface); }
 .tool.bad { background: transparent; color: var(--warn); padding: 0; }
-.out {
-  font: 11.5px/1.5 var(--mono); color: var(--faint); white-space: nowrap; overflow: hidden;
-  text-overflow: ellipsis; opacity: 0; transition: opacity .25s ease;
-}
-.out.show { opacity: 1; }
-.out::before { content: "→ "; }
-.out:empty { display: none; }
-
-/* The whole trajectory, one sliver per turn */
-.deck { flex: none; height: 38px; position: relative; }
-.track { position: absolute; left: 0; right: 0; top: 4px; height: 18px; }
-.sliver {
-  position: absolute; top: 0; height: 100%; border-radius: 1.5px; background: var(--accent);
-  transform: scaleY(0); transform-origin: bottom; transition: transform .2s ease, background-color 1.2s ease;
-}
-.sliver.in { transform: scaleY(1); }
-.sliver.submit { top: -5px; height: calc(100% + 5px); }
-.tick { position: absolute; top: 0; height: 26px; border-left: 1px dashed var(--faint); }
-.label { position: absolute; top: 25px; font: 10.5px var(--mono); color: var(--faint); transform: translateX(-50%); white-space: nowrap; }
-.counter { position: absolute; top: 25px; right: 0; font: 10.5px var(--mono); color: var(--muted); white-space: nowrap; transition: color 1.2s ease; }
-
-/* Once the rollout ends, it's fixed data */
-.frozen .card { filter: grayscale(1); opacity: .6; }
-.frozen .sliver { background: var(--frozen); }
-.frozen .counter { color: var(--faint); }
-.stage > * { transition: opacity .8s ease; }
-.fading > * { opacity: 0; }
+.out { font: 11.5px/1.5 var(--mono); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.out:not(:empty)::before { content: "→ "; }
 
 @media (max-width: 520px) {
-  .stage { height: 420px; padding: 12px; }
+  .stage { --h: 124px; --step: 2px; height: 300px; }
   .card { font-size: 12px; }
   .call { font-size: 11px; }
 }
@@ -112,17 +70,7 @@ figure { margin: 40px auto; max-width: 760px; padding: 0 16px; }
 </head>
 <body>
 <figure>
-  <div class="stage" id="stage">
-    <div class="card task">
-      <div class="who">user</div>
-      <div class="title" id="title"></div>
-      <div class="collapse" id="problem"><div><pre id="code"></pre></div></div>
-    </div>
-    <div class="feed"><div class="feed-inner" id="feed"></div></div>
-    <div class="deck">
-      <div class="track" id="track"></div>
-    </div>
-  </div>
+  <div class="stage" id="stage"></div>
 </figure>
 <script>
 // One stored base-model rollout (runs/train250, django__django-16485), cut down to one line per part of each turn.
@@ -573,127 +521,111 @@ const TRAJ = {
 };
 </script>
 <script>
-const SCALE = 80;  // turns the track spans (this rollout ends at 73)
-const LIMIT = 40;
-const MAX_CARDS = 12;
 const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-const $ = id => document.getElementById(id);
+const stage = document.getElementById("stage");
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
 
 const [titleLine, ...rest] = TRAJ.problem.split("\n");
-const codeLines = rest.filter(l => l.trim() && l.trim() !== "Description");
+const codeLines = rest.filter(l => l.trim().startsWith("floatformat(") || l.includes("throw"));
 const turns = TRAJ.turns;
-const pct = t => `${(t - 1) / SCALE * 100}%`;
+let deck = [];  // the user card, then one card per turn; the last one is in front
 
 async function typeInto(node, text, cps) {
-  for (let i = 1; i <= text.length; i += 2) {
-    node.textContent = text.slice(0, i);
-    await sleep(2000 / cps);
-  }
+  for (let i = 1; i <= text.length; i += 2) { node.textContent = text.slice(0, i); await sleep(2000 / cps); }
   node.textContent = text;
 }
 
-function buildTrack() {
-  const track = $("track");
-  track.replaceChildren();
-  const tick = el("div", "tick"); tick.style.left = pct(LIMIT + 1); track.append(tick);
-  for (const [t, text] of [[1, "1"], [LIMIT + 1, String(LIMIT)]]) {
-    const l = el("div", "label", text); l.style.left = pct(t); track.append(l);
-  }
-  const counter = el("div", "counter"); counter.id = "counter"; track.append(counter);
+// Each card sits one step higher than the card in front of it
+function layout(skipFront = false) {
+  const step = parseFloat(getComputedStyle(stage).getPropertyValue("--step"));
+  deck.forEach((card, i) => {
+    if (skipFront && i === deck.length - 1) return;
+    card.style.zIndex = i;
+    card.style.transform = `translateY(${-(deck.length - 1 - i) * step}px)`;
+    card.classList.toggle("front", i === deck.length - 1);
+  });
 }
 
-function addSliver(t, last) {
-  const s = el("div", "sliver" + (last ? " submit" : ""));
-  s.style.left = pct(t);
-  s.style.width = `calc(${100 / SCALE}% - 2px)`;
-  $("track").append(s);
-  requestAnimationFrame(() => s.classList.add("in"));
-  const c = $("counter");
-  c.textContent = last ? `turn ${t} · submitted` : `turn ${t}`;
+function deal(card) {  // slides the card in from below, onto the front of the deck
+  card.style.transform = "translateY(28px)";  // opaque from the start, so the cards behind never show through
+  stage.append(card);
+  deck.push(card);
+  layout(true);
+  requestAnimationFrame(() => requestAnimationFrame(() => layout()));
 }
 
-function makeCard(t) {
+function userCard() {
+  const card = el("div", "card user"), title = el("div", "title"), code = el("pre");
+  card.append(el("div", "head", "user"), title, code);
+  return { card, title, code };
+}
+
+function turnCard(t) {
   const [thought, tool, cmd, out] = turns[t - 1];
-  const slot = el("div", "slot"), inner = el("div"), card = el("div", "card");
-  const body = el("div", "body");
-  const th = el("div", "thought"), call = el("div", "call"), o = el("div", "out");
+  const card = el("div", "card"), th = el("div", "thought"), call = el("div", "call"), o = el("div", "out");
   const chip = tool === "none" ? el("span", "tool bad", "⚠ no valid tool call")
              : el("span", "tool" + (tool === "task_complete" ? " submit" : ""), tool);
   const code = el("span");
   call.append(chip, code);
-  body.append(th, call, o);
-  card.append(el("div", "tn", String(t)), body);
-  inner.append(card); slot.append(inner);
-  $("feed").append(slot);
-  while ($("feed").children.length > MAX_CARDS) $("feed").firstChild.remove();
-  requestAnimationFrame(() => requestAnimationFrame(() => slot.classList.add("open")));
-  return { th, code, o, thought, cmd, out };
+  card.append(el("div", "head", `turn ${t}`), th, call, o);
+  return { card, th, code, o, thought, cmd, out };
 }
 
 async function turn(t, typed) {
-  const c = makeCard(t);
+  const c = turnCard(t);
+  if (!typed) { c.th.textContent = c.thought; c.code.textContent = c.cmd; c.o.textContent = c.out; }
+  deal(c.card);
   if (typed) {
-    await sleep(250);
-    await typeInto(c.th, c.thought, 130);
-    await sleep(120);
-    await typeInto(c.code, c.cmd, 170);
     await sleep(200);
-  } else {
-    c.th.textContent = c.thought; c.code.textContent = c.cmd;
+    await typeInto(c.th, c.thought, 260);
+    await typeInto(c.code, c.cmd, 320);
+    await sleep(120);
+    c.o.textContent = c.out;
   }
-  c.o.textContent = c.out;
-  c.o.classList.add("show");
-  addSliver(t, t === turns.length);
 }
 
-// Time between untyped turns: slows down early, speeds through the middle, lands on the last one
+// Time between dealt cards: quick, then a blur through the middle, then it lands on the last one
 function gap(t) {
   const n = turns.length;
-  if (t >= n - 3) return 380;
-  if (t <= 14) return 650 - (t - 4) * 52;
-  return 85;
+  if (t >= n - 2) return 260;
+  if (t <= 10) return 380 - (t - 3) * 45;
+  return 40;
 }
 
 function reset() {
-  const stage = $("stage");
   stage.classList.remove("frozen", "fading");
-  $("feed").replaceChildren();
-  $("title").textContent = "";
-  $("code").textContent = "";
-  $("problem").classList.remove("shut");
-  buildTrack();
+  stage.replaceChildren();
+  deck = [];
 }
 
 async function play() {
   reset();
-  await sleep(500);
-  await typeInto($("title"), titleLine, 60);
-  for (const line of codeLines) { $("code").textContent += ($("code").textContent ? "\n" : "") + line; await sleep(140); }
-  await sleep(900);
-  $("problem").classList.add("shut");
-  await sleep(300);
-  for (let t = 1; t <= 3; t++) { await turn(t, true); await sleep(450); }
-  for (let t = 4; t <= turns.length; t++) { await turn(t, false); await sleep(gap(t)); }
-  await sleep(1200);
-  $("stage").classList.add("frozen");
-  await sleep(3200);
-  $("stage").classList.add("fading");
-  await sleep(1000);
+  const u = userCard();
+  deal(u.card);
+  await sleep(350);
+  await typeInto(u.title, titleLine, 90);
+  for (const line of codeLines) { u.code.textContent += (u.code.textContent ? "\n" : "") + line; await sleep(90); }
+  await sleep(600);
+  for (let t = 1; t <= 2; t++) { await turn(t, true); await sleep(350); }
+  for (let t = 3; t <= turns.length; t++) { await turn(t, false); await sleep(gap(t)); }
+  await sleep(1100);
+  stage.classList.add("frozen");
+  await sleep(2400);
+  stage.classList.add("fading");
+  await sleep(700);
 }
 
-function still() {  // reduced motion: the end state, no animation
+function still() {  // reduced motion: the finished deck, no animation
   reset();
-  $("title").textContent = titleLine;
-  $("problem").classList.add("shut");
-  for (let t = turns.length - MAX_CARDS + 1; t <= turns.length; t++) {
-    const c = makeCard(t); c.th.textContent = c.thought; c.code.textContent = c.cmd;
-    c.o.textContent = c.out; c.o.classList.add("show");
+  const u = userCard(); u.title.textContent = titleLine; u.code.textContent = codeLines.join("\n");
+  stage.append(u.card); deck.push(u.card);
+  for (let t = 1; t <= turns.length; t++) {
+    const c = turnCard(t); c.th.textContent = c.thought; c.code.textContent = c.cmd; c.o.textContent = c.out;
+    stage.append(c.card); deck.push(c.card);
   }
-  for (let t = 1; t <= turns.length; t++) addSliver(t, t === turns.length);
-  $("stage").classList.add("frozen");
+  layout();
+  stage.classList.add("frozen");
 }
 
 if (reduced) still();
