@@ -108,7 +108,7 @@ function figure(svg) {
   const LOSS_Y = 298, LOSS_H = 34;  // the per-token loss strip: bars stand on this line
   const VIEW_RIGHT = 540;  // the focused token stays left of this as the row scrolls
   const ACC_X0 = 60, ACC_X1 = 240, N_STREAM = 200, CENTER_Y = 190;
-  const STREAM_S = 3, SCORE_X = 520;  // the speed-up's length, and where its tokens get scored  // where the losses pile up during the speed-up, and how many tokens go by
+  const STREAM_S = 2, SCORE_X = 520;  // the speed-up's length, and where its tokens get scored  // where the losses pile up during the speed-up, and how many tokens go by
   const TOKENS_PER_TURN = 26;
   const POOL = ["Let", " me", " check", " the", " docs", ".", "bash", "(", "grep", " -r", " floatformat", ")", "Now", " run", " tests", "All", " pass"];
   const CHART = { slots: 9, gap: .55, sigma: .9 };  // candidates per distribution, gap between bars, KDE width (in slots)
