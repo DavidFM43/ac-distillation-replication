@@ -10,6 +10,7 @@
   /* The cards are terminal panes, dark in both page themes */
   --term: #161615;
   --term-edge: #3a3a36;
+  --term-top: #6a6964;  /* the top edge, what shows of each card behind the front one */
   --term-ink: #e8e6e1;
   --term-dim: #8e8d87;
   --term-faint: #63625d;
@@ -26,16 +27,18 @@ body { margin: 0; background: var(--bg); font-family: var(--mono); }
 figure { margin: 40px auto; max-width: 760px; padding: 0 16px; }
 
 /* Every card has the same height, so the cards behind the front one show as evenly spaced edges */
-.stage { --h: 112px; --step: 2.5px; height: 340px; max-width: 600px; margin: 0 auto; position: relative; transition: opacity .6s ease, filter 1s ease; }
-.stage.frozen { filter: grayscale(1); opacity: .5; }
+.stage { --h: 108px; --step: 4px; height: 410px; max-width: 600px; margin: 0 auto; position: relative; transition: opacity .6s ease, filter 1s ease; }
+.stage.frozen { filter: grayscale(1); opacity: .72; }
 .stage.fading { opacity: 0; }
 .card {
   position: absolute; left: 0; right: 0; bottom: 0; height: var(--h);
-  background: var(--term); border: 1px solid var(--term-edge); border-radius: 7px;
+  background: var(--term); border: 1px solid var(--term-edge); border-top-color: var(--term-top); border-radius: 7px;
   padding: 10px 14px; font: 12px/1.55 var(--mono); color: var(--term-ink); overflow: hidden;
-  transition: transform .28s ease, box-shadow .28s ease;
+  transform-origin: 50% 100%;
+  transition: transform .28s ease, box-shadow .28s ease, filter .28s ease;
 }
-.card.front { box-shadow: 0 8px 22px -12px rgb(0 0 0 / .5); }
+.card { box-shadow: 0 -1px 0 rgb(0 0 0 / .55); }  /* a dark line above each card sets its light top edge apart */
+.card.front { box-shadow: 0 -1px 0 rgb(0 0 0 / .55), 0 8px 22px -12px rgb(0 0 0 / .5); }
 .head { position: absolute; top: 9px; right: 12px; font-size: 10.5px; color: var(--term-faint); }
 .line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.55em; padding-right: 56px; }
 .mark { display: inline-block; width: 2ch; }
@@ -56,7 +59,7 @@ figure { margin: 40px auto; max-width: 760px; padding: 0 16px; }
 .out .mark { color: var(--term-faint); }
 
 @media (max-width: 520px) {
-  .stage { --h: 128px; --step: 2px; height: 310px; }
+  .stage { --h: 124px; --step: 3px; height: 360px; }
   .card { font-size: 11px; padding: 9px 11px; }
 }
 </style>
@@ -531,14 +534,20 @@ async function typeInto(node, text, cps) {
   node.textContent = text;
 }
 
-// Each card sits one step higher than the card in front of it
+// Seen from slightly above: each card behind sits a step higher, a bit narrower and a bit darker
+const SHRINK = 0.0016, DIM = 0.006;
+// A loosely squared deck: each card keeps its own small offset and tilt once it's behind the front one
+const jitter = i => { const r = k => (Math.sin(i * 12.9898 + k * 78.233) * 43758.5453) % 1; return [r(1) * 3, r(2) * 0.45]; };
 function layout(skipFront = false) {
   const step = parseFloat(getComputedStyle(stage).getPropertyValue("--step"));
   deck.forEach((card, i) => {
     if (skipFront && i === deck.length - 1) return;
+    const depth = deck.length - 1 - i;
     card.style.zIndex = i;
-    card.style.transform = `translateY(${-(deck.length - 1 - i) * step}px)`;
-    card.classList.toggle("front", i === deck.length - 1);
+    const [dx, rot] = depth ? jitter(i) : [0, 0];
+    card.style.transform = `translateY(${-depth * step}px) translateX(${dx}px) rotate(${rot}deg) scaleX(${1 - depth * SHRINK})`;
+    card.style.filter = `brightness(${1 - Math.min(depth * DIM, 0.35)})`;
+    card.classList.toggle("front", depth === 0);
   });
 }
 
