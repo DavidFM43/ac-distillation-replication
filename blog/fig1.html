@@ -45,7 +45,10 @@ figure { margin: 40px auto; max-width: 760px; padding: 0 16px; }
 .card.front { box-shadow: 0 6px 18px -10px rgb(0 0 0 / .25); }
 .card.user { border-top: 2px solid var(--ink); }
 .head { font: 11px var(--mono); color: var(--faint); margin-bottom: 2px; }
-.title { font-weight: 600; min-height: 1.45em; }
+.ask { min-height: 1.45em; }
+.issue { margin-top: 4px; padding-left: 9px; border-left: 2px solid var(--line); opacity: 0; transition: opacity .35s ease; }
+.issue.show { opacity: 1; }
+.title { font-weight: 600; font-size: 12.5px; }
 .user pre { margin: 0; font: 11.5px/1.5 var(--mono); color: var(--muted); white-space: pre-wrap; }
 .thought {
   color: var(--muted); min-height: 1.45em;
@@ -526,8 +529,10 @@ const stage = document.getElementById("stage");
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
 
-const [titleLine, ...rest] = TRAJ.problem.split("\n");
-const codeLines = rest.filter(l => l.trim().startsWith("floatformat(") || l.includes("throw"));
+// The real prompt wraps the GitHub issue in instructions to fix it in the repo; one line stands in for those
+const ASK = "Fix this issue in the django repo:";
+const titleLine = TRAJ.problem.split("\n")[0];
+const codeLines = ["floatformat('0.00', 0)", "ValueError: valid range for prec is [1, MAX_PREC]"];
 const turns = TRAJ.turns;
 let deck = [];  // the user card, then one card per turn; the last one is in front
 
@@ -556,9 +561,10 @@ function deal(card) {  // slides the card in from below, onto the front of the d
 }
 
 function userCard() {
-  const card = el("div", "card user"), title = el("div", "title"), code = el("pre");
-  card.append(el("div", "head", "user"), title, code);
-  return { card, title, code };
+  const card = el("div", "card user"), ask = el("div", "ask"), issue = el("div", "issue");
+  issue.append(el("div", "title", titleLine), el("pre", "", codeLines.join("\n")));
+  card.append(el("div", "head", "user"), ask, issue);
+  return { card, ask, issue };
 }
 
 function turnCard(t) {
@@ -604,9 +610,10 @@ async function play() {
   const u = userCard();
   deal(u.card);
   await sleep(350);
-  await typeInto(u.title, titleLine, 90);
-  for (const line of codeLines) { u.code.textContent += (u.code.textContent ? "\n" : "") + line; await sleep(90); }
-  await sleep(600);
+  await typeInto(u.ask, ASK, 90);
+  await sleep(150);
+  u.issue.classList.add("show");  // pasted, not typed
+  await sleep(1100);
   for (let t = 1; t <= 2; t++) { await turn(t, true); await sleep(350); }
   for (let t = 3; t <= turns.length; t++) { await turn(t, false); await sleep(gap(t)); }
   await sleep(1100);
@@ -618,7 +625,7 @@ async function play() {
 
 function still() {  // reduced motion: the finished deck, no animation
   reset();
-  const u = userCard(); u.title.textContent = titleLine; u.code.textContent = codeLines.join("\n");
+  const u = userCard(); u.ask.textContent = ASK; u.issue.classList.add("show");
   stage.append(u.card); deck.push(u.card);
   for (let t = 1; t <= turns.length; t++) {
     const c = turnCard(t); c.th.textContent = c.thought; c.code.textContent = c.cmd; c.o.textContent = c.out;
