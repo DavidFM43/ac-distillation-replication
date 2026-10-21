@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Self-distillation figure</title>
+<style>
+:root {
+  --bg: #fcfcfb; --ink: #1a1a19; --muted: #6b6a66; --faint: #b4b3ae; --line: #e6e5e1;
+  --turn: #d6d5d0; --fixed: #ecebe7; --task: #3b3b38; --student: #3d7fd6; --teacher: #e09a2f; --hint: #e09a2f;
+  --loss: #8a8984;
+  --sans: ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bg: #1b1b1a; --ink: #ecebe8; --muted: #a09f9a; --faint: #5a5955; --line: #34342f; --turn: #4a4a46; --fixed: #2a2a28; --task: #c9c8c3; --loss: #9a9994; }
+}
+:root[data-theme="dark"] { --bg: #1b1b1a; --ink: #ecebe8; --muted: #a09f9a; --faint: #5a5955; --line: #34342f; --turn: #4a4a46; --fixed: #2a2a28; --task: #c9c8c3; --loss: #9a9994; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); }
+figure { margin: 32px auto 48px; max-width: 680px; padding: 0 16px; }
+svg { width: 100%; height: auto; display: block; overflow: visible; }
+svg text { font-family: var(--mono); }
+/* Everything moves or fades once per beat */
+svg * { transition: transform .6s ease, opacity .5s ease, fill .4s ease, stroke .3s ease; }
+.grow { transform-box: fill-box; transform-origin: center bottom; }
+.grow.down { transform-origin: center top; }
+.fast * { transition-duration: .08s; }
+.skip * { transition: none !important; }
+</style>
+</head>
+<body>
+<figure>
+  <svg id="fig" viewBox="0 0 600 322" role="img"
+       aria-label="Offline self-distillation: a fixed rollout, the same rollout with a hint, and each target token scored by comparing the model's next-token distributions with and without the hint; the per-token losses are the training signal"></svg>
+</figure>
+<script>
+// Illustrative, not real data. A stored turn after the hint and, at each of its tokens, the main
+// candidates for that position as [token, p student (no hint), p teacher (with hint)]; the token in the
+// rollout is first. The rest of each distribution is a long tail.
+const TOKENS = ["Let", " me", " also", " run", " the", " tests", "."];
+const NEXT = [
+  [["Let", .80, .62], ["I", .13, .18], ["All", .04, .15]],
+  [[" me", .97, .96], [" us", .02, .03]],
+  [[" also", .48, .07], [" run", .30, .09], [" submit", .02, .42], [" wrap", .03, .36]],
+  [[" run", .62, .55], [" check", .25, .30], [" look", .08, .06]],
+  [[" the", .86, .80], [" all", .10, .13]],
+  [[" tests", .95, .94], [" suite", .03, .04]],
+  [[".", .62, .38], [" and", .05, .32], [" too", .25, .22]],
+];
+// The tokens after that turn, scored at speed: [token, KL]. Mostly the hint changes nothing;
+// now and then the model keeps exploring where the teacher would wrap up.
+const MORE = [
+  ["bash", .01], ["(", 0], ["cd", .02], [" tests", .01], [" &&", 0], [" python", .01], [" runtests", .03], [".py", 0], [")", 0],
+  ["Ran", .02], [" 93", .01], [" tests", 0], [".", .05], ["All", .4], [" pass", .1], [".", .03], [" Let", .2], [" me", .01],
+  [" check", .9], [" the", .05], [" docs", .6], [" too", .3], [".", .04], ["bash", .01], ["(", 0], ["grep", .05], [" -r", .02],
+  [" floatformat", 0], [" docs", .01], [")", 0], ["No", .1], [" changes", .05], [" needed", .2], [".", .02], [" Now", .7], [" let", .1],
+  [" me", .01], [" look", .8], [" at", .02], [" the", .01], [" humanize", .4], [" module", .02], [".", .01], ["bash", .01], ["(", 0],
+];
+const HINT = "You're taking too long. Wrap up.";
+
+// KL(teacher ‖ student) over the main candidates and the rest of the vocabulary
+function kl(cands) {
+  const rest = j => Math.max(1 - cands.reduce((t, c) => t + c[j], 0), 1e-3);
+  return cands.map(c => [c[1], c[2]]).concat([[rest(1), rest(2)]]).reduce((t, [a, b]) => t + b * Math.log(b / a), 0);
+}
+function klColor(k) {
+  const x = Math.min(Math.max(k, 0) / 1.2, 1), g = [95, 174, 120], r = [224, 87, 76];
+  return `rgb(${g.map((v, i) => Math.round(v + (r[i] - v) * x)).join(" ")})`;
+}
+
+// A whole next-token distribution over `slots` candidates, ordered by the teacher's probability:
+// the main candidates, then a long tail of unnamed tokens. [text, p student, p teacher, is target]
+function distribution(i, slots) {
+  const cands = [...NEXT[i]].sort((a, b) => b[2] - a[2]);
+  const rest = j => Math.max(1 - cands.reduce((t, c) => t + c[j], 0), 0);
+  const n = slots - cands.length, w = Array.from({ length: n }, (_, k) => 0.8 ** (k + 1)), W = w.reduce((a, b) => a + b, 0);
+  const tail = w.map((v, k) => ["", rest(1) * v / W * (1 + .3 * Math.sin(k * 1.3 + i)), rest(2) * v / W * (1 + .3 * Math.sin(k * 1.9 + i)), false]);
+  return cands.map(c => [c[0], c[1], c[2], c === NEXT[i][0]]).concat(tail);
+}
+
+// ---- The figure ----
+
+function figure(svg) {
+  const NS = "http://www.w3.org/2000/svg";
+  const css = v => `var(--${v})`;
+  // window.FIG_START = "speedup" fast-forwards the first loop to the speed-up, for reviewing the end
+  let skipping = window.FIG_START === "speedup";
+  const sleep = ms => skipping ? Promise.resolve() : new Promise(r => setTimeout(r, ms));
+  const frame = () => skipping ? Promise.resolve() : new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  function s(tag, attrs = {}, text, parent = svg) {
+    const e = document.createElementNS(NS, tag);
+    if (tag === "text") attrs = { fill: css("muted"), "font-size": 11, ...attrs };  // defaults as attributes, so each text can override them
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    if (text != null) e.textContent = text;
+    parent.append(e);
+    return e;
+  }
+  const show = (e, on = true) => { e.style.opacity = on ? 1 : 0; };
+  const move = (e, dx, dy) => { e.style.transform = `translate(${dx}px, ${dy}px)`; };
+
+  // ---- Layout ----
+
+  const N_TURNS = 16, HINT_AT = 8;  // the hint goes before the 8th turn shown
+  const BW = 22, BH = 30, GAP = 5, X0 = 106, ROW_A = 50, ROW_B = 130;
+  const bx = t => X0 + t * (BW + GAP);  // t = 0 is the task
+  const ROW_Y = 118, CELL_H = 24, TOK_X = 250;  // the target tokens
+  const LOSS_Y = 298, LOSS_H = 34;  // the per-token loss strip: bars stand on this line
+  const VIEW_RIGHT = 540;  // the focused token stays left of this as the row scrolls
+  const ACC_X0 = 60, ACC_X1 = 240, N_STREAM = 200, CENTER_Y = 190;
+  const STREAM_S = 1.5, SCORE_X = 520;  // the speed-up's length, and where its tokens get scored  // where the losses pile up during the speed-up, and how many tokens go by
+  const TOKENS_PER_TURN = 26;
+  const POOL = ["Let", " me", " check", " the", " docs", ".", "bash", "(", "grep", " -r", " floatformat", ")", "Now", " run", " tests", "All", " pass"];
+  const CHART = { slots: 9, gap: .55, sigma: .9 };  // candidates per distribution, gap between bars, KDE width (in slots)
+  const CHART_W = 180, CHART_H = 46;
+
+  let el = {};
+
+  function build() {
+    svg.replaceChildren();
+    el = { a: [], b: [], cells: [], offset: 0 };
+    const hidden = { style: "opacity: 0" };
+
+    // Rows: the rollout (A) and its copy with the hint (B). B starts on top of A and moves down.
+    for (let t = 0; t <= N_TURNS; t++) {
+      const fill = css(t ? "turn" : "task");
+      el.a.push(s("rect", { x: bx(t), y: ROW_A, width: BW, height: BH, rx: 4, fill, ...hidden }));
+      el.b.push(s("rect", { x: bx(t), y: ROW_A, width: BW, height: BH, rx: 4, fill, ...hidden }));
+    }
+    el.hint = s("rect", { x: bx(HINT_AT), y: ROW_B, width: BW, height: BH, rx: 4, fill: css("hint"), ...hidden });
+    el.hintText = s("text", { x: bx(HINT_AT) + BW / 2, y: ROW_B + BH + 22, "text-anchor": "middle", fill: css("teacher"), ...hidden }, `“${HINT}”`);
+
+    // The turns after the hint, outlined in both rows: the fixed tokens training looks at
+    const outline = (y, shift) => s("rect", { x: bx(HINT_AT) + shift - 4, y: y - 4, width: bx(N_TURNS) - bx(HINT_AT) + BW + 8, height: BH + 8, rx: 7,
+      fill: "none", stroke: css("ink"), "stroke-width": 1.2, "stroke-dasharray": "3 3", ...hidden });
+    el.outA = outline(ROW_A, 0);
+    el.outB = outline(ROW_B, BW + GAP);
+
+    const label = (y, text, attrs = {}) => s("text", { x: 0, y, ...hidden, ...attrs }, text);
+    el.lblA = label(ROW_A + 19, "rollout");
+    el.lblB = label(ROW_B + 19, "rollout + hint");
+    el.student = s("g", hidden);
+    s("circle", { cx: 5, cy: ROW_A + 11, r: 4, fill: css("student") }, null, el.student);
+    s("text", { x: 15, y: ROW_A + 15, fill: css("student") }, "student", el.student);
+    s("text", { x: 15, y: ROW_A + 28, "font-size": 9.5 }, "the model", el.student);
+    el.teacher = s("g", hidden);
+    s("circle", { cx: 5, cy: ROW_B + 11, r: 4, fill: css("teacher") }, null, el.teacher);
+    s("text", { x: 15, y: ROW_B + 15, fill: css("teacher") }, "teacher", el.teacher);
+    s("text", { x: 15, y: ROW_B + 28, "font-size": 9.5 }, "same model", el.teacher);
+
+    // Target tokens and their loss bars, on a track that scrolls; clipped so it never runs into the labels
+    const clip = s("clipPath", { id: "trackClip" }, null, s("defs"));
+    s("rect", { x: ACC_X1 + 8, y: 0, width: 600 - ACC_X1 - 8, height: 320 }, null, clip);  // never past the right edge
+    const window_ = s("g", { "clip-path": "url(#trackClip)" });
+    el.track = s("g", {}, null, window_);
+    el.nextX = TOK_X;
+    TOKENS.forEach(t => addCell(t));
+    const last = el.cells[el.cells.length - 1];
+    el.more = s("text", { x: last.x + last.w + 10, y: ROW_Y + 16, "font-size": 13, ...hidden }, "…", el.track);
+
+    // ...under a wedge that opens out of one fixed turn
+    el.wedge = s("path", { d: `M${bx(HINT_AT)},${ROW_A - 30 + BH} L${bx(HINT_AT) + BW},${ROW_A - 30 + BH} L${last.x + last.w + 24},${ROW_Y - 2} L${TOK_X},${ROW_Y - 2} Z`,
+      fill: css("fixed"), ...hidden });
+    svg.insertBefore(el.wedge, window_);
+    el.picked = s("rect", { x: bx(HINT_AT), y: ROW_A, width: BW, height: BH, rx: 4, fill: "none", stroke: css("ink"), "stroke-width": 1.5, ...hidden });
+    el.lblTarget = label(ROW_Y + 16, "target");
+    el.lblLoss = label(LOSS_Y - 4, "loss");
+    el.lossLine = s("line", { x1: 56, x2: 600, y1: LOSS_Y, y2: LOSS_Y, stroke: css("line"), ...hidden });
+
+    // Each model's context, laid right before the target tokens
+    el.ctx = { student: context("student"), teacher: context("teacher") };
+
+    // The training signal: every scored token's loss, packed side by side on the left as the stream goes by
+    el.acc = s("g", { style: `opacity: 0; transform-box: view-box; transform-origin: ${ACC_X0}px ${LOSS_Y}px` });
+    s("line", { x1: ACC_X0, x2: ACC_X1, y1: LOSS_Y, y2: LOSS_Y, stroke: css("line"), "vector-effect": "non-scaling-stroke" }, null, el.acc);
+    el.accCaption = s("text", { x: ACC_X0, y: CENTER_Y + 18, "font-size": 10, ...hidden }, "the training signal: one loss for every target token, across all the fixed turns");
+    el.nAcc = 0;
+  }
+
+  // A made-up per-token KL for the stream after MORE: high at the start of turns, where the model decides
+  // what to do next, and now and then where it keeps exploring; near zero everywhere else.
+  function spikeKL(t, k, n) {
+    const r = Math.abs(Math.sin(n * 12.9898 + t * 78.233) * 43758.5453) % 1;
+    if (k < 2) return r ** 1.5 * (1.3 - k * .5);
+    return r > .985 ? r * .5 : r ** 8 * .08;
+  }
+
+  function addCell(t, k = null) {
+    const x = el.nextX, w = Math.max(t.trim().length * 8 + 16, 30);
+    const g = s("g", { style: "opacity: 0" }, null, el.track);
+    const r = s("rect", { x, y: ROW_Y, width: w, height: CELL_H, rx: 4, fill: css("fixed"), stroke: css("turn") }, null, g);
+    s("text", { x: x + w / 2, y: ROW_Y + 16, "text-anchor": "middle", fill: css("ink"), "font-size": 12 }, t.trim() || "␣", g);
+    const cell = { g, r, x, w, c: x + w / 2, k };
+    el.cells.push(cell);
+    el.nextX += w + 8;
+    return cell;
+  }
+
+  function context(who) {
+    const g = s("g", { style: "opacity: 0" });
+    const bw = 16, gp = 4, hint = who === "teacher";
+    const blocks = ["task", ...Array(7).fill("turn"), ...(hint ? ["hint"] : [])];
+    let x = TOK_X - 10 - blocks.length * (bw + gp) + gp;
+    const x0 = x;
+    for (const b of blocks) { s("rect", { x, y: ROW_Y + 1, width: bw, height: CELL_H - 2, rx: 3, fill: css(b) }, null, g); x += bw + gp; }
+    s("rect", { x: x0 - 4, y: ROW_Y - 3, width: x - gp - x0 + 8, height: CELL_H + 6, rx: 6, fill: "none", stroke: css(who), "stroke-width": 1.5 }, null, g);
+    s("text", { x: x0 - 4, y: ROW_Y + CELL_H + 18, "font-size": 9.5, fill: css(who) }, hint ? "rollout + hint" : "rollout", g);
+    return g;
+  }
+
+  // The two distributions at token i, mirrored around the token: the teacher's above, the student's below,
+  // same candidates in the same order (by the teacher's probability). Heights are √p, so the tail shows;
+  // a smooth curve (a Gaussian KDE over the bars) sits behind each.
+  function chart(i) {
+    const d = distribution(i, CHART.slots), slot = CHART_W / d.length, bw = slot * (1 - CHART.gap);
+    const c = el.cells[i].c + el.offset;  // the chart isn't on the scrolling track
+    const x0 = Math.min(Math.max(c - CHART_W / 2, 70), 600 - CHART_W - 20);
+    const cx = k => x0 + (k + .5) * slot, hgt = p => Math.sqrt(p) * CHART_H;
+    const g = s("g", { style: "opacity: 0" });
+    const parts = { student: [], teacher: [] };
+    for (const [who, j, base, dir] of [["teacher", 2, ROW_Y - 12, -1], ["student", 1, ROW_Y + CELL_H + 12, 1]]) {
+      // the curve
+      const pts = [];
+      for (let x = x0 - slot; x <= x0 + CHART_W + slot * 1.5; x += 1.5) {
+        pts.push([x, d.reduce((t, cand, k) => t + hgt(cand[j]) * Math.exp(-((x - cx(k)) ** 2) / (2 * (CHART.sigma * slot) ** 2)), 0)]);
+      }
+      const peak = Math.max(...pts.map(p => p[1])), top = Math.max(...d.map(cand => hgt(cand[j])));
+      const path = `M${pts[0][0]},${base} ` + pts.map(([x, v]) => `L${x.toFixed(1)},${(base + dir * v / peak * top * 1.08).toFixed(1)}`).join(" ") + ` L${pts[pts.length - 1][0]},${base} Z`;
+      parts[who].push(s("path", { class: `grow${dir > 0 ? " down" : ""}`, d: path, fill: css(who), opacity: .25, style: "transform: scaleY(0)" }, null, g));
+      // the bars
+      d.forEach((cand, k) => {
+        const h = Math.max(.8, hgt(cand[j]));
+        parts[who].push(s("rect", { class: `grow${dir > 0 ? " down" : ""}`, x: cx(k) - bw / 2, y: dir < 0 ? base - h : base, width: bw, height: h,
+          fill: css(who), style: "transform: scaleY(0)" }, null, g));
+      });
+      s("line", { x1: x0 - slot, x2: x0 + CHART_W + slot * 1.5, y1: base, y2: base, stroke: css("turn") }, null, g);
+      parts[who + "Label"] = s("text", { x: x0 - slot - 6, y: base + dir * 12 + 4, "text-anchor": "end", "font-size": 10, fill: css(who), style: "opacity: 0" }, who, g);
+    }
+    // names under the student's side; the target token in bold
+    const sb = ROW_Y + CELL_H + 12;
+    d.forEach((cand, k) => {
+      if (!cand[0]) return;
+      const lx = cx(k) + 3, ly = sb + CHART_H + 14;
+      s("text", { x: lx, y: ly, "text-anchor": "end", transform: `rotate(-40 ${lx} ${ly})`, "font-size": 9.5,
+        ...(cand[3] ? { fill: css("ink"), "font-weight": 700 } : {}) }, cand[0].trim(), g);
+    });
+    return { g, parts };
+  }
+  async function grow(ch, who) {
+    show(ch.g); show(ch.parts[who + "Label"]);
+    await frame();
+    ch.parts[who].forEach(b => { b.style.transform = "scaleY(1)"; });
+  }
+  function drop(ch) { show(ch.g, false); setTimeout(() => ch.g.remove(), 600); }
+
+  // Only the token being scored stands out; the others wait, scored or not
+  function focusOn(i) {
+    el.cells.forEach((cell, j) => {
+      cell.r.style.fill = css("fixed");
+      cell.r.style.stroke = j === i ? css("ink") : css("turn");
+      cell.r.setAttribute("stroke-width", j === i ? 1.5 : 1);
+      cell.g.style.opacity = i === null || j === i ? 1 : .35;
+    });
+    const cell = el.cells[i];
+    if (cell && cell.c + el.offset > VIEW_RIGHT) { el.offset = VIEW_RIGHT - cell.c; move(el.track, el.offset, 0); }  // keep it in view
+  }
+
+  // Compare: the token shows its score, and its loss goes into the strip below
+  function score(i, k, opts) { scoreCell(el.cells[i], k, opts); }
+  function scoreCell(cell, k, { number = true } = {}) {
+    cell.r.style.fill = klColor(k);
+    const h = 1.5 + Math.min(k / 1.5, 1) * LOSS_H;
+    const bar = s("rect", { class: "grow", x: cell.c - 4, y: LOSS_Y - h, width: 8, height: h, rx: 1.5, fill: css("loss"), style: "transform: scaleY(0)" }, null, el.track);
+    requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.transform = "scaleY(1)"; }));
+    cell.bar = bar;
+    if (number) {
+      const t = s("text", { x: cell.c, y: LOSS_Y - h - 5, "text-anchor": "middle", "font-size": 9.5, fill: css("ink"), style: "opacity: 0" }, k.toFixed(2), el.track);
+      requestAnimationFrame(() => show(t));
+      setTimeout(() => show(t, false), 1400);
+    }
+    cell.k = k;
+  }
+
+  // A scored token's loss joins the pile on the left: one thin line per token, in order
+  function absorb(cell) {
+    if (cell.absorbed || cell.k == null) return;
+    cell.absorbed = true;
+    const x = ACC_X0 + el.nAcc++ * (ACC_X1 - ACC_X0) / N_STREAM, h = 1.5 + Math.min(cell.k / 1.5, 1) * LOSS_H;
+    s("line", { x1: x, x2: x, y1: LOSS_Y, y2: LOSS_Y - h, stroke: css("loss"), "stroke-width": .8 }, null, el.acc);
+  }
+
+  // The rest of the target tokens glide past, accelerating, for about STREAM_S seconds. Each is scored as it
+  // crosses the scoring line, and its loss joins the pile on the left as it leaves the frame.
+  function stream() {
+    const queue = Array.from({ length: N_STREAM - TOKENS.length }, (_, n) =>
+      n < MORE.length ? MORE[n] : [POOL[n % POOL.length], spikeKL(Math.floor(n / TOKENS_PER_TURN), n % TOKENS_PER_TURN, n)]);
+    el.cells.forEach(c => { c.scored = true; c.r.style.fill = css("fixed"); c.r.style.stroke = css("turn"); c.g.style.opacity = .45; });
+    el.track.style.transition = "none";
+    // how far the row has to travel for the last token to leave on the left; accelerate to cover it in time
+    const width = queue.reduce((t, [tok]) => t + Math.max(tok.trim().length * 8 + 16, 30) + 8, 0);
+    const start = el.offset, distance = el.nextX + width + start - (ACC_X1 + 8);
+    const v0 = 150, acc = 2 * (distance - v0 * STREAM_S) / STREAM_S ** 2;
+    return new Promise(done => {
+      const t0 = performance.now();
+      const step = now => {
+        const t = Math.min((now - t0) / 1000, STREAM_S);
+        el.offset = start - (v0 * t + acc * t * t / 2);
+        el.track.style.transform = `translate(${el.offset}px, 0px)`;
+        while (queue.length && el.nextX + el.offset < 620) {  // new tokens come in from the right
+          const [tok, k] = queue.shift(), cell = addCell(tok, k);
+          cell.g.style.opacity = .45;
+        }
+        for (const cell of el.cells) {
+          if (!cell.scored && cell.c + el.offset < SCORE_X) {  // scored as it passes, a brief flash
+            cell.scored = true;
+            cell.g.style.opacity = 1;
+            scoreCell(cell, cell.k, { number: false });
+            setTimeout(() => { cell.r.style.fill = css("fixed"); cell.g.style.opacity = .45; }, 70);
+          }
+          if (cell.x + cell.w + el.offset < ACC_X1 + 8) absorb(cell);
+        }
+        while (el.cells.length && el.cells[0].absorbed) {  // gone off the left
+          const gone = el.cells.shift();
+          gone.g.remove(); gone.bar?.remove();
+        }
+        if (!queue.length && !el.cells.length) return done();
+        requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
+  }
+
+  // ---- The loop ----
+
+  async function play() {
+    build();
+    if (skipping) svg.classList.add("skip");
+    await frame();
+
+    // 1. The rollout: a finished sequence of turns
+    show(el.lblA);
+    for (const r of el.a) { show(r); await sleep(70); }
+    await sleep(1000);
+
+    // 2. The same rollout with a hint in the middle; the turns after it are the same, shifted over
+    show(el.lblB);
+    el.b.forEach(r => { show(r); move(r, 0, ROW_B - ROW_A); });
+    await sleep(800);
+    el.b.forEach((r, t) => { if (t >= HINT_AT) move(r, BW + GAP, ROW_B - ROW_A); });
+    move(el.hint, 0, -24);
+    await sleep(450);
+    show(el.hint); move(el.hint, 0, 0);
+    await sleep(400);
+    show(el.hintText);
+    await sleep(1800);
+
+    // 3. One model reads both: the student the plain rollout, the teacher the rollout with the hint.
+    //    Training looks only at the turns after the hint, the same fixed tokens in both.
+    show(el.lblA, false); show(el.lblB, false); show(el.hintText, false);
+    await sleep(300);
+    show(el.student); show(el.teacher);
+    await sleep(600);
+    show(el.outA); show(el.outB);
+    await sleep(2400);
+
+    // 4. The target tokens come straight out of the fixed rollout, and there are many more of them
+    [el.student, el.teacher, el.outB, el.hint, ...el.b].forEach(e => show(e, false));
+    await sleep(500);
+    [...el.a, el.outA, el.picked].forEach(e => move(e, 0, -30));
+    await sleep(500);
+    show(el.picked);
+    show(el.wedge);
+    await sleep(300);
+    for (const cell of el.cells) { show(cell.g); await sleep(70); }
+    show(el.more);
+    show(el.lblTarget);
+    await sleep(1700);
+
+    // Score them one at a time, starting with the first
+    [...el.a, el.outA, el.picked, el.wedge, el.lblTarget].forEach(e => show(e, false));
+    show(el.lblLoss); show(el.lossLine);
+    focusOn(0);
+    await sleep(900);
+
+    // The student reads its context and gives its distribution for this token...
+    const first = chart(0);
+    show(el.ctx.student);
+    await sleep(500);
+    await grow(first, "student");
+    await sleep(1700);
+    // ...then the teacher's context swaps in: the same rollout plus the hint
+    show(el.ctx.student, false);
+    await sleep(350);
+    show(el.ctx.teacher);
+    await sleep(500);
+    await grow(first, "teacher");
+    await sleep(1800);
+    show(el.ctx.teacher, false);
+    await sleep(300);
+    // Compare the two: that's this token's loss
+    score(0, kl(NEXT[0]));
+    await sleep(1500);
+    drop(first);
+    await sleep(380);
+
+    // The next tokens, the same way
+    for (let i = 1; i < TOKENS.length; i++) {
+      const key = i === 2, quick = i > 2;
+      focusOn(i);
+      await sleep(quick ? 150 : 350);
+      const ch = chart(i);
+      await grow(ch, "student"); await grow(ch, "teacher");
+      await sleep(key ? 2400 : quick ? 450 : 900);
+      score(i, kl(NEXT[i]));
+      await sleep(key ? 1500 : quick ? 300 : 700);
+      drop(ch);
+      await sleep(380);
+    }
+
+    // ...and on through every token of every fixed turn, faster and faster, each token's loss piling
+    // up on the left as it goes by.
+    if (skipping) { skipping = false; svg.classList.remove("skip"); await sleep(300); }
+    show(el.more, false);
+    svg.classList.add("fast");
+    show(el.acc);
+    await stream();
+    svg.classList.remove("fast");
+
+    // Pull back: the losses of every target token move to the center and spread across the frame
+    [el.track, el.lblLoss, el.lossLine].forEach(e => show(e, false));
+    await sleep(500);
+    el.acc.style.transition = "transform 1.2s ease";
+    el.acc.style.transform = `translate(0px, ${CENTER_Y - LOSS_Y}px) scale(${(590 - ACC_X0) / (ACC_X1 - ACC_X0)}, 1.8)`;
+    await sleep(900);
+    show(el.accCaption);
+    await sleep(5000);
+    [el.acc, el.accCaption, el.lossLine].forEach(e => show(e, false));
+    await sleep(900);
+  }
+
+  function still() {  // reduced motion: the moment the hint matters
+    build();
+    el.cells.forEach(c => show(c.g));
+    show(el.more); show(el.lblLoss); show(el.lossLine);
+    focusOn(2);
+    [0, 1, 2].forEach(i => score(i, kl(NEXT[i]), { number: false }));
+    [0, 1].forEach(i => { el.cells[i].r.style.fill = css("fixed"); });
+    const ch = chart(2);
+    show(ch.g); show(ch.parts.studentLabel); show(ch.parts.teacherLabel);
+    [...ch.parts.student, ...ch.parts.teacher].forEach(b => { b.style.transform = "none"; });
+  }
+
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) still();
+  else (async () => { for (;;) await play(); })();
+}
+
+figure(document.getElementById("fig"));
+</script>
+</body>
+</html>
